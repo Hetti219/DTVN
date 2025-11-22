@@ -1,0 +1,161 @@
+syntax = "proto3";
+
+package validator;
+
+option go_package = "github.com/Hetti219/distributed-ticket-validation/proto";
+
+// ValidatorMessage is the main message type for communication between validators
+message ValidatorMessage {
+  enum Type {
+    PRE_PREPARE = 0;
+    PREPARE = 1;
+    COMMIT = 2;
+    VIEW_CHANGE = 3;
+    CHECKPOINT = 4;
+    STATE_UPDATE = 5;
+    HEARTBEAT = 6;
+  }
+  Type type = 1;
+  bytes payload = 2;
+  bytes signature = 3;
+  int64 timestamp = 4;
+  string sender_id = 5;
+}
+
+// PrePrepare message from primary/leader node
+message PrePrepare {
+  int64 view = 1;
+  int64 sequence = 2;
+  bytes digest = 3;
+  Request request = 4;
+}
+
+// Prepare message from replica nodes
+message Prepare {
+  int64 view = 1;
+  int64 sequence = 2;
+  bytes digest = 3;
+  string node_id = 4;
+}
+
+// Commit message from replica nodes
+message Commit {
+  int64 view = 1;
+  int64 sequence = 2;
+  bytes digest = 3;
+  string node_id = 4;
+}
+
+// ViewChange message for leader election
+message ViewChange {
+  int64 new_view = 1;
+  string node_id = 2;
+  repeated PreparedProof prepared = 3;
+}
+
+// PreparedProof contains proof of preparation
+message PreparedProof {
+  int64 sequence = 1;
+  bytes digest = 2;
+  int64 view = 3;
+}
+
+// Checkpoint message for state snapshots
+message Checkpoint {
+  int64 sequence = 1;
+  bytes state_digest = 2;
+  string node_id = 3;
+  int64 timestamp = 4;
+}
+
+// StateUpdate message for gossip protocol
+message StateUpdate {
+  repeated TicketState tickets = 1;
+  VectorClock vector_clock = 2;
+  string node_id = 3;
+}
+
+// VectorClock for causality tracking
+message VectorClock {
+  map<string, uint64> clocks = 1;
+}
+
+// Request represents a ticket validation request
+message Request {
+  string request_id = 1;
+  string ticket_id = 2;
+  TicketOperation operation = 3;
+  bytes ticket_data = 4;
+  int64 timestamp = 5;
+  bytes client_signature = 6;
+}
+
+// TicketOperation defines the operation type
+enum TicketOperation {
+  VALIDATE = 0;
+  CONSUME = 1;
+  DISPUTE = 2;
+  QUERY = 3;
+}
+
+// TicketState represents the state of a ticket
+message TicketState {
+  string ticket_id = 1;
+  State state = 2;
+  int64 last_updated = 3;
+  string validator_id = 4;
+  VectorClock vector_clock = 5;
+  bytes metadata = 6;
+}
+
+// State enum for ticket states
+enum State {
+  ISSUED = 0;
+  PENDING = 1;
+  VALIDATED = 2;
+  CONSUMED = 3;
+  DISPUTED = 4;
+}
+
+// GossipMessage for peer-to-peer dissemination
+message GossipMessage {
+  string message_id = 1;
+  bytes payload = 2;
+  int32 ttl = 3;
+  repeated string seen_by = 4;
+  int64 timestamp = 5;
+}
+
+// PeerInfo for peer discovery
+message PeerInfo {
+  string peer_id = 1;
+  repeated string addresses = 2;
+  int64 last_seen = 3;
+  bool is_validator = 4;
+}
+
+// HealthCheck message
+message HealthCheck {
+  string node_id = 1;
+  int64 timestamp = 2;
+  NodeStatus status = 3;
+  NetworkStats stats = 4;
+}
+
+// NodeStatus represents current node status
+message NodeStatus {
+  bool is_healthy = 1;
+  int64 current_view = 2;
+  int64 current_sequence = 3;
+  int32 connected_peers = 4;
+  string role = 5;
+}
+
+// NetworkStats for monitoring
+message NetworkStats {
+  int64 messages_sent = 1;
+  int64 messages_received = 2;
+  int64 consensus_rounds = 3;
+  int64 failed_consensus = 4;
+  double avg_latency_ms = 5;
+}
