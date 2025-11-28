@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'dtvn'
+    environment: 'development'
+
+scrape_configs:
+  - job_name: 'validator-nodes'
+    static_configs:
+      - targets:
+          - 'validator-0:9090'
+          - 'validator-1:9090'
+          - 'validator-2:9090'
+          - 'validator-3:9090'
+          - 'validator-4:9090'
+          - 'validator-5:9090'
+          - 'validator-6:9090'
+        labels:
+          group: 'validators'
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets:
+          - 'localhost:9090'
