@@ -120,6 +120,11 @@ func (p *P2PHost) Addrs() []multiaddr.Multiaddr {
 	return p.host.Addrs()
 }
 
+// Host returns the underlying libp2p host
+func (p *P2PHost) Host() host.Host {
+	return p.host
+}
+
 // Connect establishes a connection to a peer
 func (p *P2PHost) Connect(ctx context.Context, peerInfo peer.AddrInfo) error {
 	if err := p.host.Connect(ctx, peerInfo); err != nil {
@@ -170,6 +175,17 @@ func (p *P2PHost) SendMessage(ctx context.Context, peerID peer.ID, data []byte) 
 	p.mu.Unlock()
 
 	return nil
+}
+
+// SendTo sends a message to a specific peer by node ID string
+func (p *P2PHost) SendTo(ctx context.Context, nodeID string, data []byte) error {
+	// Convert string nodeID to peer.ID
+	peerID, err := peer.Decode(nodeID)
+	if err != nil {
+		return fmt.Errorf("failed to decode peer ID %s: %w", nodeID, err)
+	}
+
+	return p.SendMessage(ctx, peerID, data)
 }
 
 // Broadcast sends a message to all connected peers
