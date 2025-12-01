@@ -13,7 +13,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
 	"github.com/libp2p/go-libp2p/p2p/security/noise"
-	"github.com/libp2p/go-libp2p/p2p/security/tls"
+	libp2ptls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	"github.com/multiformats/go-multiaddr"
 )
 
@@ -24,12 +24,12 @@ const (
 
 // P2PHost represents a libp2p host for validator nodes
 type P2PHost struct {
-	host      host.Host
-	ctx       context.Context
-	cancel    context.CancelFunc
-	mu        sync.RWMutex
-	peers     map[peer.ID]*PeerConnection
-	handlers  map[string]MessageHandler
+	host     host.Host
+	ctx      context.Context
+	cancel   context.CancelFunc
+	mu       sync.RWMutex
+	peers    map[peer.ID]*PeerConnection
+	handlers map[string]MessageHandler
 }
 
 // PeerConnection represents a connection to a peer
@@ -82,7 +82,7 @@ func NewP2PHost(ctx context.Context, cfg *Config) (*P2PHost, error) {
 		libp2p.DefaultMuxers,
 		// Enable security with Noise and TLS
 		libp2p.Security(noise.ID, noise.New),
-		libp2p.Security(tls.ID, tls.New),
+		libp2p.Security(libp2ptls.ID, libp2ptls.New),
 		// Enable NAT traversal
 		libp2p.NATPortMap(),
 		// Enable relay
