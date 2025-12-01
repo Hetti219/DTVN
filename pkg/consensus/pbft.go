@@ -50,6 +50,16 @@ type PrepareMsg struct {
 	NodeID   string
 }
 
+// GetView returns the view number
+func (m *PrepareMsg) GetView() int64 {
+	return m.View
+}
+
+// GetSequence returns the sequence number
+func (m *PrepareMsg) GetSequence() int64 {
+	return m.Sequence
+}
+
 // CommitMsg represents a COMMIT message
 type CommitMsg struct {
 	View     int64
@@ -58,12 +68,32 @@ type CommitMsg struct {
 	NodeID   string
 }
 
+// GetView returns the view number
+func (m *CommitMsg) GetView() int64 {
+	return m.View
+}
+
+// GetSequence returns the sequence number
+func (m *CommitMsg) GetSequence() int64 {
+	return m.Sequence
+}
+
 // PrePrepareMsg represents a PRE-PREPARE message
 type PrePrepareMsg struct {
 	View     int64
 	Sequence int64
 	Digest   string
 	Request  *Request
+}
+
+// GetView returns the view number
+func (m *PrePrepareMsg) GetView() int64 {
+	return m.View
+}
+
+// GetSequence returns the sequence number
+func (m *PrePrepareMsg) GetSequence() int64 {
+	return m.Sequence
 }
 
 // Request represents a client request
@@ -371,7 +401,22 @@ func (n *PBFTNode) processMessages() {
 			return
 		case msg := <-n.messageQueue:
 			// Process based on message type
-			// This would be implemented with proper type switching
+			switch m := msg.(type) {
+			case *PrePrepareMsg:
+				if err := n.handlePrePrepare(m); err != nil {
+					fmt.Printf("Error handling PRE-PREPARE: %v\n", err)
+				}
+			case *PrepareMsg:
+				if err := n.HandlePrepare(m); err != nil {
+					fmt.Printf("Error handling PREPARE: %v\n", err)
+				}
+			case *CommitMsg:
+				if err := n.HandleCommit(m); err != nil {
+					fmt.Printf("Error handling COMMIT: %v\n", err)
+				}
+			default:
+				fmt.Printf("Unknown message type: %T\n", m)
+			}
 		}
 	}
 }
