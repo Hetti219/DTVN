@@ -85,10 +85,8 @@ func NewP2PHost(ctx context.Context, cfg *Config) (*P2PHost, error) {
 		libp2p.Security(libp2ptls.ID, libp2ptls.New),
 		// Enable NAT traversal
 		libp2p.NATPortMap(),
-		// Enable relay
+		// Enable relay (can relay through other peers)
 		libp2p.EnableRelay(),
-		// Enable auto relay if not bootstrap node
-		libp2p.EnableAutoRelay(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create libp2p host: %w", err)
