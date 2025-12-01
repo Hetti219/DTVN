@@ -68,12 +68,12 @@ type PrePrepareMsg struct {
 
 // Request represents a client request
 type Request struct {
-	RequestID     string
-	TicketID      string
-	Operation     string
-	Data          []byte
-	Timestamp     int64
-	ClientSig     []byte
+	RequestID string
+	TicketID  string
+	Operation string
+	Data      []byte
+	Timestamp int64
+	ClientSig []byte
 }
 
 // Checkpoint represents a state checkpoint
@@ -256,7 +256,7 @@ func (n *PBFTNode) HandlePrepare(msg *PrepareMsg) error {
 
 	// Check if we have quorum (2f+1 PREPARE messages)
 	if n.checkPrepareQuorum(msg.Sequence) {
-		return n.moveToCom mitPhase(msg.Sequence, msg.Digest)
+		return n.moveToCommitPhase(msg.Sequence, msg.Digest)
 	}
 
 	return nil
