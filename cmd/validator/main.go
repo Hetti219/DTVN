@@ -154,7 +154,7 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 	}
 
 	// Initialize discovery
-	discovery, err := network.NewDiscovery(ctx, p2pHost.(*network.P2PHost).host, &network.DiscoveryConfig{
+	discovery, err := network.NewDiscovery(ctx, p2pHost.Host(), &network.DiscoveryConfig{
 		BootstrapPeers: bootstrapPeers,
 		IsBootstrap:    cfg.IsBootstrap,
 	})
