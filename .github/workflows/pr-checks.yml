@@ -1,0 +1,134 @@
+name: Pull Request Checks
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  pr-metadata:
+    name: PR Metadata Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check PR title
+      uses: amannn/action-semantic-pull-request@v5
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        types: |
+          feat
+          fix
+          docs
+          style
+          refactor
+          perf
+          test
+          build
+          ci
+          chore
+          revert
+        requireScope: false
+        subjectPattern: ^[A-Z].+$
+        subjectPatternError: |
+          The subject "{subject}" found in the pull request title "{title}"
+          didn't match the configured pattern. Please ensure that the subject
+          starts with an uppercase character.
+
+  pr-size:
+    name: PR Size Check
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Check PR size
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const { data: pr } = await github.rest.pulls.get({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            pull_number: context.issue.number,
+          });
+
+          const additions = pr.additions;
+          const deletions = pr.deletions;
+          const changes = additions + deletions;
+
+          let label = '';
+          let comment = '';
+
+          if (changes < 100) {
+            label = 'size/XS';
+            comment = '✅ This PR is extra small (< 100 lines changed).';
+          } else if (changes < 300) {
+            label = 'size/S';
+            comment = '✅ This PR is small (< 300 lines changed).';
+          } else if (changes < 600) {
+            label = 'size/M';
+            comment = '⚠️ This PR is medium-sized (< 600 lines changed).';
+          } else if (changes < 1200) {
+            label = 'size/L';
+            comment = '⚠️ This PR is large (< 1200 lines changed). Consider breaking it up into smaller PRs.';
+          } else {
+            label = 'size/XL';
+            comment = '🚨 This PR is extra large (≥ 1200 lines changed). Please consider breaking it up into smaller, more reviewable PRs.';
+          }
+
+          // Add label
+          await github.rest.issues.addLabels({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            labels: [label]
+          });
+
+          // Post comment
+          await github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            body: `${comment}\n\n📊 **Stats**: +${additions} lines, -${deletions} lines, ${changes} total changes`
+          });
+
+  conflicting-files:
+    name: Check for Conflicts
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check for merge conflicts
+      uses: olivr/copybara-action@v1.2.3
+      with:
+        sot_repo: ${{ github.repository }}
+        sot_branch: ${{ github.base_ref }}
+        destination_repo: ${{ github.repository }}
+        destination_branch: ${{ github.head_ref }}
+        access_token: ${{ secrets.GITHUB_TOKEN }}
+        ssh_key: ""
+      continue-on-error: true
+
+  auto-assign:
+    name: Auto Assign Reviewers
+    runs-on: ubuntu-latest
+    if: github.event.action == 'opened'
+
+    steps:
+    - name: Auto assign
+      uses: kentaro-m/auto-assign-action@v2.0.0
+      with:
+        configuration-path: ".github/auto-assign.yml"

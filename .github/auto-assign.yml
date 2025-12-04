@@ -1,0 +1,13 @@
+# Auto-assign reviewers to pull requests
+
+addReviewers: true
+addAssignees: true
+
+reviewers:
+  - Hetti219
+
+numberOfReviewers: 1
+
+skipKeywords:
+  - wip
+  - draft
