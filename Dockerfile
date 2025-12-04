@@ -23,13 +23,17 @@ RUN CGO_ENABLED=1 GOOS=linux go build -a -installsuffix cgo -o /validator cmd/va
 FROM alpine:latest
 
 # Install runtime dependencies
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates wget
 
 # Create app directory
 WORKDIR /root/
 
 # Copy binary from builder
 COPY --from=builder /validator .
+
+# Copy entrypoint script
+COPY docker/entrypoint.sh /root/entrypoint.sh
+RUN chmod +x /root/entrypoint.sh
 
 # Create data directory
 RUN mkdir -p /root/data
@@ -40,14 +44,5 @@ RUN mkdir -p /root/data
 # 9090: Metrics port
 EXPOSE 4001 8080 9090
 
-# Set environment variables
-ENV NODE_ID=validator-1
-ENV LISTEN_PORT=4001
-ENV API_PORT=8080
-ENV DATA_DIR=/root/data
-
-# Run the validator
-ENTRYPOINT ["./validator"]
-
-# Default command line arguments
-CMD ["-id", "${NODE_ID}", "-port", "4001", "-api-port", "8080", "-data-dir", "/root/data"]
+# Run the validator using entrypoint script
+ENTRYPOINT ["/root/entrypoint.sh"]
