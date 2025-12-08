@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 name: Release
 
 on:
@@ -26,7 +25,7 @@ jobs:
       run: git fetch --force --tags
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v6
       with:
         go-version: '1.25.5'
         cache: true
@@ -85,7 +84,7 @@ jobs:
       run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
 
     - name: Build and push Docker image
-      uses: docker/build-push-action@v5
+      uses: docker/build-push-action@v6
       with:
         context: .
         platforms: linux/amd64,linux/arm64
@@ -117,137 +116,10 @@ jobs:
       continue-on-error: true
 
     - name: Update release with notes
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       if: startsWith(github.ref, 'refs/tags/')
       with:
         body_path: CHANGELOG.md
         draft: false
         prerelease: false
         generate_release_notes: true
-=======
-name: Release
-
-on:
-  push:
-    tags:
-      - 'v*'
-
-permissions:
-  contents: write
-  packages: write
-  id-token: write
-
-jobs:
-  goreleaser:
-    name: GoReleaser
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Fetch all tags
-      run: git fetch --force --tags
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: '1.25.5'
-        cache: true
-
-    - name: Install Cosign
-      uses: sigstore/cosign-installer@v3
-
-    - name: Install Syft
-      uses: anchore/sbom-action/download-syft@v0
-
-    - name: Run GoReleaser
-      uses: goreleaser/goreleaser-action@v5
-      with:
-        distribution: goreleaser
-        version: latest
-        args: release --clean
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        COSIGN_YES: true
-
-    - name: Upload artifacts
-      uses: actions/upload-artifact@v4
-      if: always()
-      with:
-        name: release-artifacts
-        path: |
-          dist/*.tar.gz
-          dist/*.zip
-          dist/checksums.txt
-          dist/*.sbom.json
-
-  docker-release:
-    name: Docker Release
-    runs-on: ubuntu-latest
-    needs: goreleaser
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v3
-
-    - name: Set up Docker Buildx
-      uses: docker/setup-buildx-action@v3
-
-    - name: Log in to GitHub Container Registry
-      uses: docker/login-action@v3
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Extract version
-      id: version
-      run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-
-    - name: Build and push Docker image
-      uses: docker/build-push-action@v5
-      with:
-        context: .
-        platforms: linux/amd64,linux/arm64
-        push: true
-        tags: |
-          ghcr.io/${{ github.repository }}:${{ steps.version.outputs.version }}
-          ghcr.io/${{ github.repository }}:latest
-        cache-from: type=gha
-        cache-to: type=gha,mode=max
-
-  create-release-notes:
-    name: Create Release Notes
-    runs-on: ubuntu-latest
-    needs: [goreleaser, docker-release]
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
-
-    - name: Generate release notes
-      uses: orhun/git-cliff-action@v3
-      with:
-        config: cliff.toml
-        args: --latest --strip header
-      env:
-        OUTPUT: CHANGELOG.md
-      continue-on-error: true
-
-    - name: Update release with notes
-      uses: softprops/action-gh-release@v1
-      if: startsWith(github.ref, 'refs/tags/')
-      with:
-        body_path: CHANGELOG.md
-        draft: false
-        prerelease: false
-        generate_release_notes: true
->>>>>>> 33e3e0b (Refactor code structure for improved readability and maintainability)
