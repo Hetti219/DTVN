@@ -1,6 +1,6 @@
 module github.com/Hetti219/distributed-ticket-validation
 
-go 1.25.1
+go 1.25.5
 
 require (
 	github.com/boltdb/bolt v1.3.1

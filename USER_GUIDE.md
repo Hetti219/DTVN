@@ -46,7 +46,7 @@ The system allows multiple validator nodes to collaboratively validate, consume,
 
 ### Required Software
 
-1. **Go 1.25.1 or higher**
+1. **Go 1.25.5 or higher**
    - Download from: https://golang.org/dl/
    - Verify installation: `go version`
 
@@ -1412,7 +1412,7 @@ metrics:
 ### Key Takeaways
 
 1. **DTVN is a Byzantine fault-tolerant ticket validation system** using PBFT consensus
-2. **Requires Go 1.25.1+** to build and run
+2. **Requires Go 1.25.5+** to build and run
 3. **Multiple deployment options:** Single node, multi-node, Docker, Docker Compose
 4. **Tolerates f < n/3 Byzantine nodes** (e.g., 2 faults with 7 nodes)
 5. **REST API** for ticket operations and WebSocket for real-time updates
