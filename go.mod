@@ -5,7 +5,7 @@ go 1.25.5
 require (
 	github.com/boltdb/bolt v1.3.1
 	github.com/gorilla/mux v1.8.1
-	github.com/gorilla/websocket v1.5.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/libp2p/go-libp2p v0.32.0
 	github.com/libp2p/go-libp2p-kad-dht v0.25.0
 	github.com/multiformats/go-multiaddr v0.12.0
