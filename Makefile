@@ -133,11 +133,11 @@ docker-run:
 # Run Docker Compose (multi-node network)
 docker-compose-up:
 	@echo "Starting Docker Compose network..."
-	docker-compose up -d
+	docker compose up -d
 
 docker-compose-down:
 	@echo "Stopping Docker Compose network..."
-	docker-compose down
+	docker compose down
 
 # Install dependencies
 deps:
