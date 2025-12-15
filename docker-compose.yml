@@ -1,16 +1,20 @@
-version: '3.8'
-
 services:
   # Bootstrap/Primary Node
   validator-0:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: "${VERSION:-dev}"
+        COMMIT: "${COMMIT:-unknown}"
+        BUILD_DATE: "${BUILD_DATE:-unknown}"
     container_name: dtvn-validator-0
     hostname: validator-0
     environment:
       - NODE_ID=validator-0
       - LISTEN_PORT=4001
       - API_PORT=8080
-      - DATA_DIR=/root/data
+      - DATA_DIR=/home/validator/data
       - TOTAL_NODES=7
       - IS_PRIMARY=true
     ports:
@@ -18,9 +22,10 @@ services:
       - "8080:8080"
       - "9090:9090"
     volumes:
-      - validator-0-data:/root/data
+      - validator-0-data:/home/validator/data
     networks:
       - dtvn-network
+    restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 10s
@@ -30,23 +35,30 @@ services:
 
   # Validator Node 1
   validator-1:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: "${VERSION:-dev}"
+        COMMIT: "${COMMIT:-unknown}"
+        BUILD_DATE: "${BUILD_DATE:-unknown}"
     container_name: dtvn-validator-1
     hostname: validator-1
     environment:
       - NODE_ID=validator-1
       - LISTEN_PORT=4001
       - API_PORT=8080
-      - DATA_DIR=/root/data
+      - DATA_DIR=/home/validator/data
       - TOTAL_NODES=7
     ports:
       - "4002:4001"
       - "8081:8080"
       - "9091:9090"
     volumes:
-      - validator-1-data:/root/data
+      - validator-1-data:/home/validator/data
     networks:
       - dtvn-network
+    restart: unless-stopped
     depends_on:
       validator-0:
         condition: service_healthy
@@ -59,7 +71,13 @@ services:
 
   # Validator Node 2
   validator-2:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: "${VERSION:-dev}"
+        COMMIT: "${COMMIT:-unknown}"
+        BUILD_DATE: "${BUILD_DATE:-unknown}"
     container_name: dtvn-validator-2
     hostname: validator-2
     command:
@@ -70,7 +88,7 @@ services:
       - "-api-port"
       - "8080"
       - "-data-dir"
-      - "/root/data"
+      - "/home/validator/data"
       - "-total-nodes"
       - "7"
       - "-bootstrap"
@@ -80,20 +98,29 @@ services:
       - "8082:8080"
       - "9092:9090"
     volumes:
-      - validator-2-data:/root/data
+      - validator-2-data:/home/validator/data
     networks:
       - dtvn-network
+    restart: unless-stopped
     depends_on:
-      - validator-0
+      validator-0:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 10s
 
   # Validator Node 3
   validator-3:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: "${VERSION:-dev}"
+        COMMIT: "${COMMIT:-unknown}"
+        BUILD_DATE: "${BUILD_DATE:-unknown}"
     container_name: dtvn-validator-3
     hostname: validator-3
     command:
@@ -104,7 +131,7 @@ services:
       - "-api-port"
       - "8080"
       - "-data-dir"
-      - "/root/data"
+      - "/home/validator/data"
       - "-total-nodes"
       - "7"
       - "-bootstrap"
@@ -114,20 +141,29 @@ services:
       - "8083:8080"
       - "9093:9090"
     volumes:
-      - validator-3-data:/root/data
+      - validator-3-data:/home/validator/data
     networks:
       - dtvn-network
+    restart: unless-stopped
     depends_on:
-      - validator-0
+      validator-0:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 10s
 
   # Validator Node 4
   validator-4:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: "${VERSION:-dev}"
+        COMMIT: "${COMMIT:-unknown}"
+        BUILD_DATE: "${BUILD_DATE:-unknown}"
     container_name: dtvn-validator-4
     hostname: validator-4
     command:
@@ -138,7 +174,7 @@ services:
       - "-api-port"
       - "8080"
       - "-data-dir"
-      - "/root/data"
+      - "/home/validator/data"
       - "-total-nodes"
       - "7"
       - "-bootstrap"
@@ -148,20 +184,29 @@ services:
       - "8084:8080"
       - "9094:9090"
     volumes:
-      - validator-4-data:/root/data
+      - validator-4-data:/home/validator/data
     networks:
       - dtvn-network
+    restart: unless-stopped
     depends_on:
-      - validator-0
+      validator-0:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 10s
 
   # Validator Node 5
   validator-5:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: "${VERSION:-dev}"
+        COMMIT: "${COMMIT:-unknown}"
+        BUILD_DATE: "${BUILD_DATE:-unknown}"
     container_name: dtvn-validator-5
     hostname: validator-5
     command:
@@ -172,7 +217,7 @@ services:
       - "-api-port"
       - "8080"
       - "-data-dir"
-      - "/root/data"
+      - "/home/validator/data"
       - "-total-nodes"
       - "7"
       - "-bootstrap"
@@ -182,20 +227,29 @@ services:
       - "8085:8080"
       - "9095:9090"
     volumes:
-      - validator-5-data:/root/data
+      - validator-5-data:/home/validator/data
     networks:
       - dtvn-network
+    restart: unless-stopped
     depends_on:
-      - validator-0
+      validator-0:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 10s
 
   # Validator Node 6
   validator-6:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VERSION: "${VERSION:-dev}"
+        COMMIT: "${COMMIT:-unknown}"
+        BUILD_DATE: "${BUILD_DATE:-unknown}"
     container_name: dtvn-validator-6
     hostname: validator-6
     command:
@@ -206,7 +260,7 @@ services:
       - "-api-port"
       - "8080"
       - "-data-dir"
-      - "/root/data"
+      - "/home/validator/data"
       - "-total-nodes"
       - "7"
       - "-bootstrap"
@@ -216,49 +270,60 @@ services:
       - "8086:8080"
       - "9096:9090"
     volumes:
-      - validator-6-data:/root/data
+      - validator-6-data:/home/validator/data
     networks:
       - dtvn-network
+    restart: unless-stopped
     depends_on:
-      - validator-0
+      validator-0:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
       interval: 10s
       timeout: 5s
       retries: 3
+      start_period: 10s
 
   # Prometheus for metrics collection
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v3.1.0
     container_name: dtvn-prometheus
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
     ports:
       - "9999:9090"
     volumes:
-      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     networks:
       - dtvn-network
+    restart: unless-stopped
+    user: "65534:65534"  # nobody user for security
 
   # Grafana for metrics visualization
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.5.1
     container_name: dtvn-grafana
     ports:
       - "3000:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
       - GF_SECURITY_ADMIN_USER=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_INSTALL_PLUGINS=
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards
-      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ./config/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./config/grafana/datasources:/etc/grafana/provisioning/datasources:ro
     networks:
       - dtvn-network
+    restart: unless-stopped
     depends_on:
       - prometheus
+    user: "472:0"  # grafana user for security
 
 volumes:
   validator-0-data:
