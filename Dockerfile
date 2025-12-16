@@ -43,7 +43,7 @@ RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
     cmd/validator/main.go
 
 # Final stage - use specific Alpine version for reproducibility
-FROM alpine:3.21
+FROM alpine:3.23
 
 # Add metadata labels
 LABEL org.opencontainers.image.source="https://github.com/Hetti219/distributed-ticket-validation"
