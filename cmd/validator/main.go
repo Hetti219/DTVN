@@ -247,6 +247,9 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 	// Set up handlers
 	node.setupHandlers()
 
+	// Set up peer connection callback for state synchronization
+	node.setupPeerCallbacks()
+
 	return node, nil
 }
 
@@ -499,6 +502,212 @@ func (n *ValidatorNode) setupHandlers() {
 	n.discovery.OnPeerFound(func(peerInfo peer.AddrInfo) {
 		fmt.Printf("Discovered new peer: %s\n", peerInfo.ID)
 	})
+
+	// Register handler for state synchronization messages
+	router.RegisterStateSyncHandler(func(msgType pb.ValidatorMessage_Type, payload []byte) error {
+		switch msgType {
+		case pb.ValidatorMessage_STATE_SYNC_REQUEST:
+			return n.handleStateSyncRequest(payload)
+		case pb.ValidatorMessage_STATE_SYNC_RESPONSE:
+			return n.handleStateSyncResponse(payload)
+		default:
+			return fmt.Errorf("unknown state sync message type: %v", msgType)
+		}
+	})
+}
+
+// setupPeerCallbacks sets up callbacks for peer connection events
+func (n *ValidatorNode) setupPeerCallbacks() {
+	// Set up callback for when peers successfully connect
+	n.discovery.OnPeerFound(func(peerInfo peer.AddrInfo) {
+		// Check if peer is actually connected
+		if n.p2pHost.Host().Network().Connectedness(peerInfo.ID) == 1 {
+			fmt.Printf("✅ Peer connected: %s - requesting state synchronization\n", peerInfo.ID)
+			go n.requestStateSync(peerInfo.ID)
+		}
+	})
+}
+
+// requestStateSync requests state synchronization from a newly connected peer
+func (n *ValidatorNode) requestStateSync(peerID peer.ID) {
+	// Get current sequence number from PBFT
+	currentSeq := n.pbftNode.GetSequence()
+
+	fmt.Printf("StateSync: Requesting state from peer %s (current seq: %d)\n", peerID, currentSeq)
+
+	// Create state sync request
+	request := &pb.StateSyncRequest{
+		RequesterId:  n.nodeID,
+		LastSequence: currentSeq,
+		Timestamp:    time.Now().Unix(),
+	}
+
+	// Serialize request
+	payload, err := proto.Marshal(request)
+	if err != nil {
+		fmt.Printf("StateSync: Failed to marshal state sync request: %v\n", err)
+		return
+	}
+
+	// Wrap in ValidatorMessage
+	msg := &pb.ValidatorMessage{
+		Type:      pb.ValidatorMessage_STATE_SYNC_REQUEST,
+		Payload:   payload,
+		SenderId:  n.nodeID,
+		Timestamp: time.Now().Unix(),
+	}
+
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		fmt.Printf("StateSync: Failed to marshal ValidatorMessage: %v\n", err)
+		return
+	}
+
+	// Send to specific peer
+	ctx, cancel := context.WithTimeout(n.ctx, 5*time.Second)
+	defer cancel()
+
+	if err := n.p2pHost.SendTo(ctx, peerID.String(), data); err != nil {
+		fmt.Printf("StateSync: Failed to send state sync request to %s: %v\n", peerID, err)
+	} else {
+		fmt.Printf("StateSync: Sent state sync request to %s\n", peerID)
+	}
+}
+
+// handleStateSyncRequest handles incoming state sync requests from peers
+func (n *ValidatorNode) handleStateSyncRequest(payload []byte) error {
+	var request pb.StateSyncRequest
+	if err := proto.Unmarshal(payload, &request); err != nil {
+		return fmt.Errorf("failed to unmarshal state sync request: %w", err)
+	}
+
+	fmt.Printf("StateSync: Received state sync request from %s (their seq: %d)\n",
+		request.RequesterId, request.LastSequence)
+
+	// Get current PBFT state
+	currentSeq := n.pbftNode.GetSequence()
+	currentView := n.pbftNode.GetView()
+
+	// Get validated tickets from state machine
+	validatedTickets := n.stateMachine.GetAllTickets()
+
+	// Convert tickets to protobuf format
+	pbTickets := make([]*pb.TicketState, 0, len(validatedTickets))
+	consensusLog := make([]string, 0)
+
+	for _, ticket := range validatedTickets {
+		var protoState pb.State
+		switch ticket.State {
+		case state.StateValidated:
+			protoState = pb.State_VALIDATED
+			consensusLog = append(consensusLog, ticket.ID)
+		case state.StateConsumed:
+			protoState = pb.State_CONSUMED
+		case state.StateDisputed:
+			protoState = pb.State_DISPUTED
+		default:
+			continue // Skip non-consensus states
+		}
+
+		pbTickets = append(pbTickets, &pb.TicketState{
+			TicketId:    ticket.ID,
+			State:       protoState,
+			ValidatorId: ticket.ValidatorID,
+			LastUpdated: ticket.Timestamp,
+		})
+	}
+
+	// Create response
+	response := &pb.StateSyncResponse{
+		ResponderId:       n.nodeID,
+		CurrentSequence:   currentSeq,
+		CurrentView:       currentView,
+		ValidatedTickets:  pbTickets,
+		ConsensusLog:      consensusLog,
+		Timestamp:         time.Now().Unix(),
+	}
+
+	// Serialize response
+	responsePayload, err := proto.Marshal(response)
+	if err != nil {
+		return fmt.Errorf("failed to marshal state sync response: %w", err)
+	}
+
+	// Wrap in ValidatorMessage
+	msg := &pb.ValidatorMessage{
+		Type:      pb.ValidatorMessage_STATE_SYNC_RESPONSE,
+		Payload:   responsePayload,
+		SenderId:  n.nodeID,
+		Timestamp: time.Now().Unix(),
+	}
+
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal ValidatorMessage: %w", err)
+	}
+
+	// Send response back to requester
+	ctx, cancel := context.WithTimeout(n.ctx, 5*time.Second)
+	defer cancel()
+
+	if err := n.p2pHost.SendTo(ctx, request.RequesterId, data); err != nil {
+		return fmt.Errorf("failed to send state sync response: %w", err)
+	}
+
+	fmt.Printf("StateSync: Sent state sync response to %s (%d tickets, seq: %d)\n",
+		request.RequesterId, len(pbTickets), currentSeq)
+
+	return nil
+}
+
+// handleStateSyncResponse handles incoming state sync responses from peers
+func (n *ValidatorNode) handleStateSyncResponse(payload []byte) error {
+	var response pb.StateSyncResponse
+	if err := proto.Unmarshal(payload, &response); err != nil {
+		return fmt.Errorf("failed to unmarshal state sync response: %w", err)
+	}
+
+	fmt.Printf("StateSync: Received state sync response from %s (seq: %d, view: %d, tickets: %d)\n",
+		response.ResponderId, response.CurrentSequence, response.CurrentView, len(response.ValidatedTickets))
+
+	currentSeq := n.pbftNode.GetSequence()
+
+	// If peer has newer state, synchronize
+	if response.CurrentSequence > currentSeq {
+		fmt.Printf("StateSync: ⚠️  Peer %s has newer state (peer seq: %d, our seq: %d)\n",
+			response.ResponderId, response.CurrentSequence, currentSeq)
+
+		// Synchronize validated tickets
+		syncedCount := 0
+		for _, pbTicket := range response.ValidatedTickets {
+			// Check if we already have this ticket
+			if n.stateMachine.HasTicket(pbTicket.TicketId) {
+				continue
+			}
+
+			// Only sync VALIDATED tickets (others are not consensus-approved)
+			if pbTicket.State == pb.State_VALIDATED {
+				fmt.Printf("StateSync: Syncing ticket %s from peer %s\n", pbTicket.TicketId, response.ResponderId)
+
+				// Add ticket to our state (bypassing consensus since it was already agreed upon)
+				if err := n.stateMachine.SyncTicket(pbTicket.TicketId, response.ResponderId, nil); err != nil {
+					fmt.Printf("StateSync: Failed to sync ticket %s: %v\n", pbTicket.TicketId, err)
+				} else {
+					syncedCount++
+				}
+			}
+		}
+
+		fmt.Printf("StateSync: ✅ Synchronized %d tickets from peer %s\n", syncedCount, response.ResponderId)
+	} else if response.CurrentSequence == currentSeq {
+		fmt.Printf("StateSync: ✅ State is synchronized with peer %s (seq: %d)\n",
+			response.ResponderId, currentSeq)
+	} else {
+		fmt.Printf("StateSync: ℹ️  Our state is newer than peer %s (our seq: %d, peer seq: %d)\n",
+			response.ResponderId, currentSeq, response.CurrentSequence)
+	}
+
+	return nil
 }
 
 // API interface implementation (for api.ValidatorInterface)
