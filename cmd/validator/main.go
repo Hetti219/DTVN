@@ -24,6 +24,7 @@ import (
 // ValidatorNode represents a complete validator node
 type ValidatorNode struct {
 	nodeID       string
+	totalNodes   int
 	p2pHost      *network.P2PHost
 	discovery    *network.Discovery
 	gossipEngine *gossip.GossipEngine
@@ -200,6 +201,7 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 
 	node := &ValidatorNode{
 		nodeID:       cfg.NodeID,
+		totalNodes:   cfg.TotalNodes,
 		p2pHost:      p2pHost,
 		discovery:    discovery,
 		gossipEngine: gossipEngine,
@@ -449,13 +451,31 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 
 	// If this node is the primary, propose directly
 	if n.pbftNode.IsPrimary() {
-		fmt.Printf("Node %s: Received validation request for ticket %s (I am primary)\n", n.nodeID, ticketID)
+		fmt.Printf("Node %s: ✅ Received validation request for ticket %s (I am primary)\n", n.nodeID, ticketID)
+
+		// Check peer connectivity for multi-node setup
+		peerCount := n.p2pHost.GetPeerCount()
+		expectedPeers := n.totalNodes - 1 // All nodes except self
+
+		if expectedPeers > 0 && peerCount == 0 {
+			return fmt.Errorf("no peers connected, cannot reach consensus (expected %d peers)", expectedPeers)
+		}
+		if peerCount < expectedPeers {
+			fmt.Printf("Node %s: ⚠️  WARNING - only %d/%d peers connected\n", n.nodeID, peerCount, expectedPeers)
+		}
+
 		return n.pbftNode.ProposeRequest(req)
 	}
 
 	// Non-primary nodes forward the request to all peers (primary will handle it)
 	primary := n.pbftNode.GetPrimary()
-	fmt.Printf("Node %s: Forwarding validation request for ticket %s to primary %s\n", n.nodeID, ticketID, primary)
+	fmt.Printf("Node %s: 📤 Forwarding validation request for ticket %s to primary %s\n", n.nodeID, ticketID, primary)
+
+	// Check if we have any peers to forward to
+	peerCount := n.p2pHost.GetPeerCount()
+	if peerCount == 0 {
+		return fmt.Errorf("no peers connected, cannot forward request to primary %s", primary)
+	}
 
 	// Serialize the request
 	payload, err := consensus.SerializeRequest(req)
@@ -477,7 +497,7 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 		return fmt.Errorf("failed to forward request to primary: %w", err)
 	}
 
-	fmt.Printf("Node %s: Successfully forwarded request for ticket %s\n", n.nodeID, ticketID)
+	fmt.Printf("Node %s: ✅ Successfully forwarded request for ticket %s to %d peers\n", n.nodeID, ticketID, peerCount)
 	return nil
 }
 
