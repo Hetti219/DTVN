@@ -194,23 +194,44 @@ func (p *P2PHost) Broadcast(ctx context.Context, data []byte) error {
 	for peerID := range p.peers {
 		peers = append(peers, peerID)
 	}
+	peerCount := len(peers)
 	p.mu.RUnlock()
+
+	// Log broadcast attempt
+	fmt.Printf("P2P: Broadcasting message to %d peer(s)\n", peerCount)
+
+	// Warn if no peers (important visibility for debugging)
+	if peerCount == 0 {
+		fmt.Printf("P2P: ⚠️  WARNING - Broadcasting to ZERO peers, message will not propagate!\n")
+	}
 
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(peers))
+	successCount := 0
+	var successMu sync.Mutex
 
 	for _, peerID := range peers {
 		wg.Add(1)
 		go func(pid peer.ID) {
 			defer wg.Done()
 			if err := p.SendMessage(ctx, pid, data); err != nil {
+				fmt.Printf("P2P: Failed to send to peer %s: %v\n", pid, err)
 				errChan <- err
+			} else {
+				successMu.Lock()
+				successCount++
+				successMu.Unlock()
 			}
 		}(peerID)
 	}
 
 	wg.Wait()
 	close(errChan)
+
+	// Log success summary
+	if peerCount > 0 {
+		fmt.Printf("P2P: ✅ Successfully broadcast to %d/%d peer(s)\n", successCount, peerCount)
+	}
 
 	// Return first error if any
 	for err := range errChan {
