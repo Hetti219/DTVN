@@ -165,7 +165,7 @@ func (s *Simulator) Run() error {
 
 	// Run simulation
 	endTime := time.Now().Add(s.simulationTime)
-	ticker := time.NewTicker(100 * time.Millisecond)
+	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 
 	ticketIndex := 0
@@ -183,18 +183,29 @@ func (s *Simulator) Run() error {
 			fmt.Println("\nSimulation interrupted")
 			return nil
 		case <-ticker.C:
+			// Check if all tickets processed
+			if ticketIndex >= s.ticketCount {
+				// Give async messages time to complete
+				time.Sleep(s.networkLatency * 5)
+				s.updateStats(nodes, consensusRound)
+				fmt.Printf("\rProgress: %d/%d tickets | Rounds: %d | Success: %d | Failed: %d",
+					ticketIndex, s.ticketCount, s.stats.ConsensusRounds,
+					s.stats.SuccessfulRounds, s.stats.FailedRounds)
+				fmt.Println("\nAll tickets processed")
+				return nil
+			}
+
+			// Check timeout
 			if time.Now().After(endTime) {
-				fmt.Println("\nSimulation completed")
+				fmt.Println("\nSimulation timed out")
 				return nil
 			}
 
 			// Simulate ticket operations
-			if ticketIndex < s.ticketCount {
-				ticketID := fmt.Sprintf("ticket-%d", ticketIndex)
-				s.simulateTicketValidation(nodes, ticketID)
-				ticketIndex++
-				consensusRound++
-			}
+			ticketID := fmt.Sprintf("ticket-%d", ticketIndex)
+			s.simulateTicketValidation(nodes, ticketID)
+			ticketIndex++
+			consensusRound++
 
 			// Simulate network partition (occasionally)
 			if s.partitionEnabled && rand.Float64() < 0.05 {
@@ -205,7 +216,7 @@ func (s *Simulator) Run() error {
 			s.updateStats(nodes, consensusRound)
 
 			// Print progress
-			if consensusRound%10 == 0 {
+			if consensusRound%10 == 0 || consensusRound == s.ticketCount {
 				fmt.Printf("\rProgress: %d/%d tickets | Rounds: %d | Success: %d | Failed: %d",
 					ticketIndex, s.ticketCount, s.stats.ConsensusRounds,
 					s.stats.SuccessfulRounds, s.stats.FailedRounds)
@@ -273,11 +284,8 @@ func (s *Simulator) simulateTicketValidation(nodes []*SimulatedNode, ticketID st
 		Timestamp: time.Now(),
 	}
 
-	// Broadcast to all nodes
+	// Broadcast to all nodes (message delivery is async with latency)
 	s.broadcast(nodes, msg)
-
-	// Simulate consensus delay
-	time.Sleep(s.networkLatency * time.Duration(len(nodes)))
 }
 
 // broadcast broadcasts a message to all nodes
