@@ -15,8 +15,10 @@ import (
 	"github.com/Hetti219/distributed-ticket-validation/pkg/network"
 	"github.com/Hetti219/distributed-ticket-validation/pkg/state"
 	"github.com/Hetti219/distributed-ticket-validation/pkg/storage"
+	pb "github.com/Hetti219/distributed-ticket-validation/proto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
+	"google.golang.org/protobuf/proto"
 )
 
 // ValidatorNode represents a complete validator node
@@ -286,6 +288,111 @@ func (n *ValidatorNode) Stop() error {
 
 // setupHandlers sets up event handlers
 func (n *ValidatorNode) setupHandlers() {
+	// Create message router
+	router := network.NewMessageRouter()
+
+	// Register PBFT handler - routes network messages to consensus layer
+	router.RegisterPBFTHandler(func(msgType pb.ValidatorMessage_Type, payload []byte) error {
+		return n.pbftNode.HandleNetworkMessage(int32(msgType), payload)
+	})
+
+	// Register state handler - enables state synchronization via gossip
+	router.RegisterStateHandler(func(update *pb.StateUpdate) error {
+		// Convert protobuf tickets to state.Ticket format
+		tickets := make([]*state.Ticket, len(update.Tickets))
+		for i, ts := range update.Tickets {
+			// Convert protobuf state to internal state
+			var ticketState state.TicketState
+			switch ts.State {
+			case pb.State_ISSUED:
+				ticketState = state.StateIssued
+			case pb.State_PENDING:
+				ticketState = state.StatePending
+			case pb.State_VALIDATED:
+				ticketState = state.StateValidated
+			case pb.State_CONSUMED:
+				ticketState = state.StateConsumed
+			case pb.State_DISPUTED:
+				ticketState = state.StateDisputed
+			}
+
+			// Convert vector clock
+			vc := state.NewVectorClock(n.nodeID)
+			if ts.VectorClock != nil {
+				for k, v := range ts.VectorClock.Clocks {
+					vc.Update(k, v)
+				}
+			}
+
+			tickets[i] = &state.Ticket{
+				ID:          ts.TicketId,
+				State:       ticketState,
+				ValidatorID: ts.ValidatorId,
+				Timestamp:   ts.LastUpdated,
+				VectorClock: vc,
+				Data:        ts.Metadata, // Use metadata field for data
+				Metadata:    make(map[string]string),
+			}
+		}
+
+		// Merge state from remote node (FIXES unused MergeState)
+		return n.stateMachine.MergeState(tickets)
+	})
+
+	// Set router on P2P host
+	n.p2pHost.SetRouter(router)
+
+	// Register state publisher - publishes updates via gossip
+	n.stateMachine.RegisterPublisher(func(ticketID string, ticketState state.TicketState, validatorID string, timestamp int64) error {
+		// Convert internal state to protobuf
+		var protoState pb.State
+		switch ticketState {
+		case state.StateIssued:
+			protoState = pb.State_ISSUED
+		case state.StatePending:
+			protoState = pb.State_PENDING
+		case state.StateValidated:
+			protoState = pb.State_VALIDATED
+		case state.StateConsumed:
+			protoState = pb.State_CONSUMED
+		case state.StateDisputed:
+			protoState = pb.State_DISPUTED
+		}
+
+		// Create state update message
+		update := &pb.StateUpdate{
+			Tickets: []*pb.TicketState{{
+				TicketId:    ticketID,
+				State:       protoState,
+				ValidatorId: validatorID,
+				LastUpdated: timestamp,
+			}},
+			NodeId: n.nodeID,
+		}
+
+		// Serialize state update
+		payload, err := proto.Marshal(update)
+		if err != nil {
+			return fmt.Errorf("failed to marshal state update: %w", err)
+		}
+
+		// Wrap in ValidatorMessage
+		msg := &pb.ValidatorMessage{
+			Type:      pb.ValidatorMessage_STATE_UPDATE,
+			Payload:   payload,
+			SenderId:  n.nodeID,
+			Timestamp: time.Now().Unix(),
+		}
+
+		data, err := proto.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("failed to marshal ValidatorMessage: %w", err)
+		}
+
+		// Publish via gossip
+		return n.gossipEngine.Publish(data)
+	})
+
 	// Register consensus handler
 	n.pbftNode.RegisterHandler(func(req *consensus.Request) error {
 		// Handle consensus decision
@@ -340,14 +447,16 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 		Timestamp: time.Now().Unix(),
 	}
 
-	// Submit to PBFT if primary, otherwise forward
-	if n.pbftNode.IsPrimary() {
-		return n.pbftNode.ProposeRequest(req)
+	// Only primary can propose requests in PBFT
+	if !n.pbftNode.IsPrimary() {
+		// Non-primary nodes should forward to primary
+		// For now, return error indicating primary node for client to retry
+		primary := n.pbftNode.GetPrimary()
+		return fmt.Errorf("this node is not the primary, please send request to %s", primary)
 	}
 
-	// Non-primary nodes would forward to primary
-	// For now, just validate locally (simplified)
-	return n.stateMachine.ValidateTicket(ticketID, n.nodeID, data)
+	// Submit to PBFT for consensus
+	return n.pbftNode.ProposeRequest(req)
 }
 
 func (n *ValidatorNode) ConsumeTicket(ticketID string) error {
