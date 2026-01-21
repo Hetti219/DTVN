@@ -251,8 +251,18 @@ func (s *Simulator) initializeNetwork(nodes []*SimulatedNode) {
 
 // simulateTicketValidation simulates a ticket validation consensus round
 func (s *Simulator) simulateTicketValidation(nodes []*SimulatedNode, ticketID string) {
-	// Select primary node (node-0 for simplicity)
-	primary := nodes[0]
+	// Select primary node (first honest node, not Byzantine)
+	var primary *SimulatedNode
+	for _, node := range nodes {
+		if !node.IsByzantine {
+			primary = node
+			break
+		}
+	}
+	if primary == nil {
+		// Fallback to first node if no honest nodes (shouldn't happen)
+		primary = nodes[0]
+	}
 
 	// Primary proposes ticket validation
 	msg := SimulatedMessage{
@@ -273,6 +283,15 @@ func (s *Simulator) simulateTicketValidation(nodes []*SimulatedNode, ticketID st
 // broadcast broadcasts a message to all nodes
 func (s *Simulator) broadcast(nodes []*SimulatedNode, msg SimulatedMessage) {
 	for _, node := range nodes {
+		// Skip partitioned nodes
+		node.mu.RLock()
+		isPartitioned := node.IsPartitioned
+		node.mu.RUnlock()
+
+		if isPartitioned {
+			continue
+		}
+
 		// Simulate packet loss
 		if rand.Float64() < s.packetLoss {
 			continue
@@ -283,7 +302,9 @@ func (s *Simulator) broadcast(nodes []*SimulatedNode, msg SimulatedMessage) {
 			time.Sleep(s.networkLatency)
 			select {
 			case n.MessageQueue <- msg:
+				s.mu.Lock()
 				s.stats.MessagesSent++
+				s.mu.Unlock()
 			default:
 				// Queue full, drop message
 			}
@@ -298,7 +319,9 @@ func (s *Simulator) handleNodeMessages(node *SimulatedNode, allNodes []*Simulate
 		case <-s.ctx.Done():
 			return
 		case msg := <-node.MessageQueue:
+			s.mu.Lock()
 			s.stats.MessagesReceived++
+			s.mu.Unlock()
 
 			// Byzantine nodes behave incorrectly
 			if node.IsByzantine {
@@ -372,17 +395,42 @@ func (s *Simulator) updateStats(nodes []*SimulatedNode, round int) {
 
 	s.stats.ConsensusRounds = round
 
-	// Check consensus agreement
-	if len(nodes) > 0 && len(nodes[0].ConsensusLog) > 0 {
-		// Simple check: compare first and last node logs
-		if len(nodes[0].ConsensusLog) == len(nodes[len(nodes)-1].ConsensusLog) {
-			s.stats.SuccessfulRounds = len(nodes[0].ConsensusLog)
-		} else {
-			s.stats.FailedRounds++
+	// Check consensus agreement among honest nodes using quorum (2/3+)
+	var honestNodes []*SimulatedNode
+	for _, node := range nodes {
+		if !node.IsByzantine {
+			honestNodes = append(honestNodes, node)
 		}
 	}
 
-	// Count validated tickets
+	if len(honestNodes) >= 2 {
+		// Count how many tickets each honest node has validated
+		ticketValidations := make(map[string]int)
+
+		for _, node := range honestNodes {
+			node.mu.RLock()
+			for ticketID := range node.TicketState {
+				ticketValidations[ticketID]++
+			}
+			node.mu.RUnlock()
+		}
+
+		// Calculate quorum threshold (2/3 of honest nodes)
+		quorumThreshold := (len(honestNodes) * 2 / 3) + 1
+
+		// Count tickets that reached quorum
+		successfulCount := 0
+		for _, validationCount := range ticketValidations {
+			if validationCount >= quorumThreshold {
+				successfulCount++
+			}
+		}
+
+		s.stats.SuccessfulRounds = successfulCount
+		s.stats.FailedRounds = round - successfulCount
+	}
+
+	// Count validated tickets (average across all nodes)
 	validatedCount := 0
 	for _, node := range nodes {
 		node.mu.RLock()
