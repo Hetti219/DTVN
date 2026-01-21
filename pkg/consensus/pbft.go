@@ -223,6 +223,8 @@ func (n *PBFTNode) ProposeRequest(req *Request) error {
 		fmt.Printf("Failed to wrap PRE-PREPARE message: %v\n", err)
 		return err
 	}
+
+	fmt.Printf("PBFT: Node %s broadcasting PRE-PREPARE for seq %d\n", n.nodeID, seq)
 	go func() {
 		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
 		defer cancel()
@@ -240,6 +242,9 @@ func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
+	fmt.Printf("PBFT: Node %s received PRE-PREPARE for seq %d, view %d, ticket %s\n",
+		n.nodeID, msg.Sequence, msg.View, msg.Request.TicketID)
+
 	// Validate view
 	if msg.View != n.view {
 		return fmt.Errorf("view mismatch: expected %d, got %d", n.view, msg.View)
@@ -256,6 +261,8 @@ func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 
 	// Update state
 	n.state = StatePrepare
+
+	fmt.Printf("PBFT: Node %s moving to PREPARE phase for seq %d\n", n.nodeID, msg.Sequence)
 
 	// Send PREPARE message
 	prepare := &PrepareMsg{
@@ -282,6 +289,8 @@ func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 		fmt.Printf("Failed to wrap PREPARE message: %v\n", err)
 		return err
 	}
+
+	fmt.Printf("PBFT: Node %s broadcasting PREPARE for seq %d\n", n.nodeID, msg.Sequence)
 	go func() {
 		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
 		defer cancel()
@@ -314,6 +323,16 @@ func (n *PBFTNode) HandlePrepare(msg *PrepareMsg) error {
 	}
 	n.prepareLog[msg.Sequence][msg.NodeID] = msg
 
+	// Calculate quorum requirement
+	required := 2*n.f + 1
+	if required < 1 {
+		required = 1
+	}
+	current := len(n.prepareLog[msg.Sequence])
+
+	fmt.Printf("PBFT: Node %s received PREPARE from %s for seq %d (progress: %d/%d)\n",
+		n.nodeID, msg.NodeID, msg.Sequence, current, required)
+
 	// Check if we have quorum (2f+1 PREPARE messages)
 	if n.checkPrepareQuorum(msg.Sequence) {
 		return n.moveToCommitPhase(msg.Sequence, msg.Digest)
@@ -337,6 +356,16 @@ func (n *PBFTNode) HandleCommit(msg *CommitMsg) error {
 		n.commitLog[msg.Sequence] = make(map[string]*CommitMsg)
 	}
 	n.commitLog[msg.Sequence][msg.NodeID] = msg
+
+	// Calculate quorum requirement
+	required := 2*n.f + 1
+	if required < 1 {
+		required = 1
+	}
+	current := len(n.commitLog[msg.Sequence])
+
+	fmt.Printf("PBFT: Node %s received COMMIT from %s for seq %d (progress: %d/%d)\n",
+		n.nodeID, msg.NodeID, msg.Sequence, current, required)
 
 	// Check if we have quorum (2f+1 COMMIT messages)
 	if n.checkCommitQuorum(msg.Sequence) {
@@ -380,6 +409,8 @@ func (n *PBFTNode) checkCommitQuorum(sequence int64) bool {
 func (n *PBFTNode) moveToCommitPhase(sequence int64, digest string) error {
 	n.state = StateCommit
 
+	fmt.Printf("PBFT: Node %s moving to COMMIT phase for seq %d\n", n.nodeID, sequence)
+
 	// Send COMMIT message
 	commit := &CommitMsg{
 		View:     n.view,
@@ -405,6 +436,8 @@ func (n *PBFTNode) moveToCommitPhase(sequence int64, digest string) error {
 		fmt.Printf("Failed to wrap COMMIT message: %v\n", err)
 		return err
 	}
+
+	fmt.Printf("PBFT: Node %s broadcasting COMMIT for seq %d\n", n.nodeID, sequence)
 	go func() {
 		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
 		defer cancel()
