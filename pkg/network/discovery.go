@@ -90,7 +90,17 @@ func (d *Discovery) Start() error {
 	// Announce ourselves as a validator
 	util.Advertise(d.ctx, d.routingDiscov, ValidatorRendezvous)
 
-	// Start discovery loop
+	// Run initial discovery immediately (don't wait 30s)
+	fmt.Printf("Discovery: Running initial peer discovery...\n")
+	go d.discoverPeers()
+
+	// Run again after short delay to catch newly started nodes
+	time.AfterFunc(5*time.Second, func() {
+		fmt.Printf("Discovery: Running second discovery pass...\n")
+		d.discoverPeers()
+	})
+
+	// Start periodic discovery loop
 	go d.discoveryLoop()
 
 	return nil
