@@ -127,6 +127,7 @@ type ConsensusHandler func(*Request) error
 type MessageBroadcaster interface {
 	Broadcast(ctx context.Context, data []byte) error
 	SendTo(ctx context.Context, nodeID string, data []byte) error
+	GetPeerCount() int
 }
 
 // Config holds PBFT configuration
@@ -187,7 +188,35 @@ func (n *PBFTNode) ProposeRequest(req *Request) error {
 		return fmt.Errorf("only primary can propose requests")
 	}
 
-	fmt.Printf("PBFT: Node %s proposing request for ticket %s (op: %s)\n", n.nodeID, req.TicketID, req.Operation)
+	// Verify we can reach quorum with connected peers
+	currentPeerCount := n.broadcaster.GetPeerCount()
+	// Total active nodes = connected peers + self
+	activeNodes := currentPeerCount + 1
+	// Quorum requirement: 2f + 1 nodes must respond
+	requiredQuorum := 2*n.f + 1
+
+	// Special case: single node setup (totalNodes = 1)
+	if n.totalNodes == 1 {
+		// Single node can always reach quorum (itself)
+		fmt.Printf("PBFT: Node %s proposing request for ticket %s (op: %s) [single-node mode]\n", n.nodeID, req.TicketID, req.Operation)
+	} else {
+		// Multi-node setup: check if we have enough peers
+		if activeNodes < requiredQuorum {
+			n.mu.Unlock()
+			return fmt.Errorf("insufficient peers for consensus: have %d nodes (including self), need %d for quorum (connected peers: %d, expected: %d)",
+				activeNodes, requiredQuorum, currentPeerCount, n.totalNodes-1)
+		}
+
+		// Warn if we don't have all expected peers
+		expectedPeers := n.totalNodes - 1
+		if currentPeerCount < expectedPeers {
+			fmt.Printf("PBFT: ⚠️  WARNING - Node %s proposing with only %d/%d peers connected (can reach quorum but not all nodes present)\n",
+				n.nodeID, currentPeerCount, expectedPeers)
+		}
+
+		fmt.Printf("PBFT: Node %s proposing request for ticket %s (op: %s) [active nodes: %d/%d, quorum: %d]\n",
+			n.nodeID, req.TicketID, req.Operation, activeNodes, n.totalNodes, requiredQuorum)
+	}
 
 	// Increment sequence number
 	n.sequence++
