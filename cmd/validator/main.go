@@ -447,16 +447,38 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 		Timestamp: time.Now().Unix(),
 	}
 
-	// Only primary can propose requests in PBFT
-	if !n.pbftNode.IsPrimary() {
-		// Non-primary nodes should forward to primary
-		// For now, return error indicating primary node for client to retry
-		primary := n.pbftNode.GetPrimary()
-		return fmt.Errorf("this node is not the primary, please send request to %s", primary)
+	// If this node is the primary, propose directly
+	if n.pbftNode.IsPrimary() {
+		fmt.Printf("Node %s: Received validation request for ticket %s (I am primary)\n", n.nodeID, ticketID)
+		return n.pbftNode.ProposeRequest(req)
 	}
 
-	// Submit to PBFT for consensus
-	return n.pbftNode.ProposeRequest(req)
+	// Non-primary nodes forward the request to all peers (primary will handle it)
+	primary := n.pbftNode.GetPrimary()
+	fmt.Printf("Node %s: Forwarding validation request for ticket %s to primary %s\n", n.nodeID, ticketID, primary)
+
+	// Serialize the request
+	payload, err := consensus.SerializeRequest(req)
+	if err != nil {
+		return fmt.Errorf("failed to serialize request: %w", err)
+	}
+
+	// Wrap in ValidatorMessage with CLIENT_REQUEST type
+	msgData, err := consensus.SerializePBFTMessage(pb.ValidatorMessage_CLIENT_REQUEST, payload, n.nodeID)
+	if err != nil {
+		return fmt.Errorf("failed to wrap client request: %w", err)
+	}
+
+	// Broadcast to all peers (primary will pick it up)
+	ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
+	defer cancel()
+
+	if err := n.p2pHost.Broadcast(ctx, msgData); err != nil {
+		return fmt.Errorf("failed to forward request to primary: %w", err)
+	}
+
+	fmt.Printf("Node %s: Successfully forwarded request for ticket %s\n", n.nodeID, ticketID)
+	return nil
 }
 
 func (n *ValidatorNode) ConsumeTicket(ticketID string) error {

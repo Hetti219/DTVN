@@ -69,6 +69,13 @@ func (r *MessageRouter) RouteMessage(data []byte, senderID peer.ID) error {
 
 		return r.stateHandler(stateUpdate)
 
+	case pb.ValidatorMessage_CLIENT_REQUEST:
+		// Route to PBFT handler for client request forwarding
+		if r.pbftHandler == nil {
+			return fmt.Errorf("no PBFT handler registered")
+		}
+		return r.pbftHandler(msg.Type, msg.Payload)
+
 	case pb.ValidatorMessage_VIEW_CHANGE:
 		// TODO: Implement view change handling
 		fmt.Printf("Received VIEW_CHANGE message from %s (not yet implemented)\n", senderID)

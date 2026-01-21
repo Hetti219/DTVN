@@ -576,6 +576,22 @@ func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
 		msg, err = DeserializePrepare(payload)
 	case 2: // COMMIT
 		msg, err = DeserializeCommit(payload)
+	case 7: // CLIENT_REQUEST - forwarded from non-primary node
+		// Deserialize the request
+		req, err := DeserializeRequest(payload)
+		if err != nil {
+			return fmt.Errorf("failed to deserialize client request: %w", err)
+		}
+
+		// Only primary should receive and process forwarded client requests
+		if !n.IsPrimary() {
+			return fmt.Errorf("received client request but not primary")
+		}
+
+		fmt.Printf("PBFT: Primary %s received forwarded client request for ticket %s\n", n.nodeID, req.TicketID)
+
+		// Propose the request through consensus
+		return n.ProposeRequest(req)
 	default:
 		return fmt.Errorf("unsupported PBFT message type: %d", msgType)
 	}
