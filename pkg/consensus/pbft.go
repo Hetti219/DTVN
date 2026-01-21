@@ -205,8 +205,17 @@ func (n *PBFTNode) ProposeRequest(req *Request) error {
 		Request:  req,
 	}
 
-	// Broadcast PRE-PREPARE
-	data := serializePrePrepare(prePrepare)
+	// Broadcast PRE-PREPARE using protobuf
+	payload, err := SerializePrePrepare(prePrepare)
+	if err != nil {
+		fmt.Printf("Failed to serialize PRE-PREPARE: %v\n", err)
+		return err
+	}
+	data, err := SerializePBFTMessage(0, payload, n.nodeID) // 0 = PRE_PREPARE type
+	if err != nil {
+		fmt.Printf("Failed to wrap PRE-PREPARE message: %v\n", err)
+		return err
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
 		defer cancel()
@@ -255,8 +264,17 @@ func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 	}
 	n.prepareLog[msg.Sequence][n.nodeID] = prepare
 
-	// Broadcast PREPARE
-	data := serializePrepare(prepare)
+	// Broadcast PREPARE using protobuf
+	payload, err := SerializePrepare(prepare)
+	if err != nil {
+		fmt.Printf("Failed to serialize PREPARE: %v\n", err)
+		return err
+	}
+	data, err := SerializePBFTMessage(1, payload, n.nodeID) // 1 = PREPARE type
+	if err != nil {
+		fmt.Printf("Failed to wrap PREPARE message: %v\n", err)
+		return err
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
 		defer cancel()
@@ -348,8 +366,17 @@ func (n *PBFTNode) moveToCommitPhase(sequence int64, digest string) error {
 	}
 	n.commitLog[sequence][n.nodeID] = commit
 
-	// Broadcast COMMIT
-	data := serializeCommit(commit)
+	// Broadcast COMMIT using protobuf
+	payload, err := SerializeCommit(commit)
+	if err != nil {
+		fmt.Printf("Failed to serialize COMMIT: %v\n", err)
+		return err
+	}
+	data, err := SerializePBFTMessage(2, payload, n.nodeID) // 2 = COMMIT type
+	if err != nil {
+		fmt.Printf("Failed to wrap COMMIT message: %v\n", err)
+		return err
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
 		defer cancel()
@@ -471,6 +498,50 @@ func (n *PBFTNode) IsPrimary() bool {
 	return n.isPrimary
 }
 
+// GetPrimary returns the node ID of the current primary
+func (n *PBFTNode) GetPrimary() string {
+	n.mu.RLock()
+	defer n.mu.RUnlock()
+
+	// Primary is determined by view number mod total nodes
+	primaryIndex := n.view % int64(n.totalNodes)
+
+	// Map index to node ID (simplified: assume node0, node1, etc.)
+	return fmt.Sprintf("node%d", primaryIndex)
+}
+
+// HandleNetworkMessage processes incoming PBFT messages from the network layer
+func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
+	var msg ConsensusMessage
+	var err error
+
+	// Deserialize based on message type
+	switch msgType {
+	case 0: // PRE_PREPARE
+		msg, err = DeserializePrePrepare(payload)
+	case 1: // PREPARE
+		msg, err = DeserializePrepare(payload)
+	case 2: // COMMIT
+		msg, err = DeserializeCommit(payload)
+	default:
+		return fmt.Errorf("unsupported PBFT message type: %d", msgType)
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to deserialize message: %w", err)
+	}
+
+	// Inject into message queue (this fixes the broken message flow)
+	select {
+	case n.messageQueue <- msg:
+		return nil
+	case <-n.ctx.Done():
+		return n.ctx.Err()
+	default:
+		return fmt.Errorf("message queue full, dropping message")
+	}
+}
+
 // Close shuts down the PBFT node
 func (n *PBFTNode) Close() error {
 	n.cancel()
@@ -486,16 +557,5 @@ func (n *PBFTNode) computeDigest(req *Request) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// Serialization functions (simplified - use protobuf in production)
-
-func serializePrePrepare(msg *PrePrepareMsg) []byte {
-	return []byte(fmt.Sprintf("PRE-PREPARE:%d:%d:%s", msg.View, msg.Sequence, msg.Digest))
-}
-
-func serializePrepare(msg *PrepareMsg) []byte {
-	return []byte(fmt.Sprintf("PREPARE:%d:%d:%s:%s", msg.View, msg.Sequence, msg.Digest, msg.NodeID))
-}
-
-func serializeCommit(msg *CommitMsg) []byte {
-	return []byte(fmt.Sprintf("COMMIT:%d:%d:%s:%s", msg.View, msg.Sequence, msg.Digest, msg.NodeID))
-}
+// Old string serialization functions removed - now using protobuf
+// See messages.go for the new SerializePrePrepare/Prepare/Commit functions
