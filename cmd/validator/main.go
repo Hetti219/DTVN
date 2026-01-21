@@ -89,9 +89,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Printf("Validator node %s started successfully\n", cfg.NodeID)
+	fmt.Printf("✅ Validator node %s started successfully\n", cfg.NodeID)
 	fmt.Printf("P2P listening on port %d\n", cfg.ListenPort)
 	fmt.Printf("API server on port %d\n", cfg.APIPort)
+
+	// Print full multiaddr with peer ID for bootstrapping other nodes
+	fmt.Println("\n📋 Node Multiaddresses (use these for -bootstrap flag):")
+	for _, addr := range node.p2pHost.Addrs() {
+		fmt.Printf("   %s/p2p/%s\n", addr, node.p2pHost.ID())
+	}
 
 	// Wait for interrupt signal
 	sigChan := make(chan os.Signal, 1)
@@ -145,14 +151,28 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 		}
 		addr, err := multiaddr.NewMultiaddr(peerAddr)
 		if err != nil {
-			fmt.Printf("Invalid bootstrap peer address %s: %v\n", peerAddr, err)
+			fmt.Printf("❌ Invalid bootstrap peer address %s: %v\n", peerAddr, err)
 			continue
 		}
+
+		// Try to parse as full p2p multiaddr with peer ID
 		peerInfo, err := peer.AddrInfoFromP2pAddr(addr)
 		if err != nil {
-			fmt.Printf("Failed to parse peer info from %s: %v\n", peerAddr, err)
+			// If it fails, the address might be missing the peer ID component
+			// Try to extract transport protocols and use peer discovery instead
+			fmt.Printf("⚠️  Bootstrap address %s is missing peer ID component\n", peerAddr)
+			fmt.Printf("    Attempting to connect using transport address only...\n")
+
+			// Create a temporary AddrInfo with just the multiaddr, no peer ID
+			// We'll discover the peer ID when we connect
+			bootstrapPeers = append(bootstrapPeers, peer.AddrInfo{
+				ID:    "", // Empty peer ID - will be resolved on connection
+				Addrs: []multiaddr.Multiaddr{addr},
+			})
 			continue
 		}
+
+		fmt.Printf("✅ Parsed bootstrap peer: %s at %v\n", peerInfo.ID, peerInfo.Addrs)
 		bootstrapPeers = append(bootstrapPeers, *peerInfo)
 	}
 
