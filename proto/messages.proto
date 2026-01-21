@@ -14,6 +14,7 @@ message ValidatorMessage {
     CHECKPOINT = 4;
     STATE_UPDATE = 5;
     HEARTBEAT = 6;
+    CLIENT_REQUEST = 7;
   }
   Type type = 1;
   bytes payload = 2;
