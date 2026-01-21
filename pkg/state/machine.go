@@ -40,12 +40,13 @@ type StateTransition struct {
 
 // StateMachine manages ticket states and transitions
 type StateMachine struct {
-	nodeID       string
-	currentState map[string]*Ticket
-	transitions  []StateTransition
-	vectorClock  *VectorClock
-	mu           sync.RWMutex
-	handlers     []StateChangeHandler
+	nodeID        string
+	currentState  map[string]*Ticket
+	transitions   []StateTransition
+	vectorClock   *VectorClock
+	mu            sync.RWMutex
+	handlers      []StateChangeHandler
+	publishUpdate func(ticketID string, state TicketState, validatorID string, timestamp int64) error
 }
 
 // StateChangeHandler is called when a state changes
@@ -82,6 +83,11 @@ func (sm *StateMachine) ValidateTicket(ticketID string, validatorID string, data
 		sm.currentState[ticketID] = ticket
 	}
 
+	// Check if ticket is already validated (prevent duplicates)
+	if ticket.State == StateValidated {
+		return fmt.Errorf("ticket %s already validated", ticketID)
+	}
+
 	// Check if ticket is already consumed or disputed
 	if ticket.State == StateConsumed {
 		return fmt.Errorf("ticket %s already consumed", ticketID)
@@ -116,6 +122,15 @@ func (sm *StateMachine) ValidateTicket(ticketID string, validatorID string, data
 		if err := handler(ticket, oldState, StateValidated); err != nil {
 			return fmt.Errorf("handler error: %w", err)
 		}
+	}
+
+	// Publish state update via gossip
+	if sm.publishUpdate != nil {
+		go func() {
+			if err := sm.publishUpdate(ticketID, StateValidated, validatorID, ticket.Timestamp); err != nil {
+				fmt.Printf("Failed to publish state update: %v\n", err)
+			}
+		}()
 	}
 
 	return nil
@@ -316,6 +331,13 @@ func (sm *StateMachine) RegisterHandler(handler StateChangeHandler) {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 	sm.handlers = append(sm.handlers, handler)
+}
+
+// RegisterPublisher registers a state update publisher for gossip
+func (sm *StateMachine) RegisterPublisher(publisher func(ticketID string, state TicketState, validatorID string, timestamp int64) error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.publishUpdate = publisher
 }
 
 // GetVectorClock returns a copy of the current vector clock
