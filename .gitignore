@@ -38,3 +38,6 @@ distributed-ticket-validation-implementation.md
 # Environment
 .env
 .env.local
+
+.claude/
+CLAUDE.md
