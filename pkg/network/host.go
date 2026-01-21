@@ -30,6 +30,7 @@ type P2PHost struct {
 	mu       sync.RWMutex
 	peers    map[peer.ID]*PeerConnection
 	handlers map[string]MessageHandler
+	router   *MessageRouter
 }
 
 // PeerConnection represents a connection to a peer
@@ -226,6 +227,13 @@ func (p *P2PHost) RegisterHandler(messageType string, handler MessageHandler) {
 	p.handlers[messageType] = handler
 }
 
+// SetRouter sets the message router for this host
+func (p *P2PHost) SetRouter(router *MessageRouter) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.router = router
+}
+
 // handleStream handles incoming streams from peers
 func (p *P2PHost) handleStream(stream network.Stream) {
 	defer stream.Close()
@@ -260,17 +268,29 @@ func (p *P2PHost) handleStream(stream network.Stream) {
 	}
 	p.mu.Unlock()
 
-	// Call registered handlers
+	// Route message through the router if available
 	p.mu.RLock()
-	handlers := make(map[string]MessageHandler)
-	for k, v := range p.handlers {
-		handlers[k] = v
-	}
+	router := p.router
 	p.mu.RUnlock()
 
-	for _, handler := range handlers {
-		if err := handler(peerID, data); err != nil {
-			fmt.Printf("Error handling message from peer %s: %v\n", peerID, err)
+	if router != nil {
+		// Use the new message router
+		if err := router.RouteMessage(data, peerID); err != nil {
+			fmt.Printf("Error routing message from peer %s: %v\n", peerID, err)
+		}
+	} else {
+		// Fallback to legacy handlers if router not set
+		p.mu.RLock()
+		handlers := make(map[string]MessageHandler)
+		for k, v := range p.handlers {
+			handlers[k] = v
+		}
+		p.mu.RUnlock()
+
+		for _, handler := range handlers {
+			if err := handler(peerID, data); err != nil {
+				fmt.Printf("Error handling message from peer %s: %v\n", peerID, err)
+			}
 		}
 	}
 }
