@@ -133,14 +133,16 @@ func (State) EnumDescriptor() ([]byte, []int) {
 type ValidatorMessage_Type int32
 
 const (
-	ValidatorMessage_PRE_PREPARE    ValidatorMessage_Type = 0
-	ValidatorMessage_PREPARE        ValidatorMessage_Type = 1
-	ValidatorMessage_COMMIT         ValidatorMessage_Type = 2
-	ValidatorMessage_VIEW_CHANGE    ValidatorMessage_Type = 3
-	ValidatorMessage_CHECKPOINT     ValidatorMessage_Type = 4
-	ValidatorMessage_STATE_UPDATE   ValidatorMessage_Type = 5
-	ValidatorMessage_HEARTBEAT      ValidatorMessage_Type = 6
-	ValidatorMessage_CLIENT_REQUEST ValidatorMessage_Type = 7
+	ValidatorMessage_PRE_PREPARE         ValidatorMessage_Type = 0
+	ValidatorMessage_PREPARE             ValidatorMessage_Type = 1
+	ValidatorMessage_COMMIT              ValidatorMessage_Type = 2
+	ValidatorMessage_VIEW_CHANGE         ValidatorMessage_Type = 3
+	ValidatorMessage_CHECKPOINT          ValidatorMessage_Type = 4
+	ValidatorMessage_STATE_UPDATE        ValidatorMessage_Type = 5
+	ValidatorMessage_HEARTBEAT           ValidatorMessage_Type = 6
+	ValidatorMessage_CLIENT_REQUEST      ValidatorMessage_Type = 7
+	ValidatorMessage_STATE_SYNC_REQUEST  ValidatorMessage_Type = 8
+	ValidatorMessage_STATE_SYNC_RESPONSE ValidatorMessage_Type = 9
 )
 
 // Enum value maps for ValidatorMessage_Type.
@@ -154,16 +156,20 @@ var (
 		5: "STATE_UPDATE",
 		6: "HEARTBEAT",
 		7: "CLIENT_REQUEST",
+		8: "STATE_SYNC_REQUEST",
+		9: "STATE_SYNC_RESPONSE",
 	}
 	ValidatorMessage_Type_value = map[string]int32{
-		"PRE_PREPARE":    0,
-		"PREPARE":        1,
-		"COMMIT":         2,
-		"VIEW_CHANGE":    3,
-		"CHECKPOINT":     4,
-		"STATE_UPDATE":   5,
-		"HEARTBEAT":      6,
-		"CLIENT_REQUEST": 7,
+		"PRE_PREPARE":         0,
+		"PREPARE":             1,
+		"COMMIT":              2,
+		"VIEW_CHANGE":         3,
+		"CHECKPOINT":          4,
+		"STATE_UPDATE":        5,
+		"HEARTBEAT":           6,
+		"CLIENT_REQUEST":      7,
+		"STATE_SYNC_REQUEST":  8,
+		"STATE_SYNC_RESPONSE": 9,
 	}
 )
 
@@ -1314,17 +1320,163 @@ func (x *NetworkStats) GetAvgLatencyMs() float64 {
 	return 0
 }
 
+// StateSyncRequest message for requesting state from peers
+type StateSyncRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	RequesterId   string                 `protobuf:"bytes,1,opt,name=requester_id,json=requesterId,proto3" json:"requester_id,omitempty"`
+	LastSequence  int64                  `protobuf:"varint,2,opt,name=last_sequence,json=lastSequence,proto3" json:"last_sequence,omitempty"` // Last sequence number the requester has
+	Timestamp     int64                  `protobuf:"varint,3,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StateSyncRequest) Reset() {
+	*x = StateSyncRequest{}
+	mi := &file_proto_messages_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StateSyncRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StateSyncRequest) ProtoMessage() {}
+
+func (x *StateSyncRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_messages_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StateSyncRequest.ProtoReflect.Descriptor instead.
+func (*StateSyncRequest) Descriptor() ([]byte, []int) {
+	return file_proto_messages_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *StateSyncRequest) GetRequesterId() string {
+	if x != nil {
+		return x.RequesterId
+	}
+	return ""
+}
+
+func (x *StateSyncRequest) GetLastSequence() int64 {
+	if x != nil {
+		return x.LastSequence
+	}
+	return 0
+}
+
+func (x *StateSyncRequest) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
+// StateSyncResponse message for responding to state sync requests
+type StateSyncResponse struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	ResponderId      string                 `protobuf:"bytes,1,opt,name=responder_id,json=responderId,proto3" json:"responder_id,omitempty"`
+	CurrentSequence  int64                  `protobuf:"varint,2,opt,name=current_sequence,json=currentSequence,proto3" json:"current_sequence,omitempty"`
+	CurrentView      int64                  `protobuf:"varint,3,opt,name=current_view,json=currentView,proto3" json:"current_view,omitempty"`
+	ValidatedTickets []*TicketState         `protobuf:"bytes,4,rep,name=validated_tickets,json=validatedTickets,proto3" json:"validated_tickets,omitempty"`
+	ConsensusLog     []string               `protobuf:"bytes,5,rep,name=consensus_log,json=consensusLog,proto3" json:"consensus_log,omitempty"` // Simplified consensus log (ticket IDs)
+	Timestamp        int64                  `protobuf:"varint,6,opt,name=timestamp,proto3" json:"timestamp,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *StateSyncResponse) Reset() {
+	*x = StateSyncResponse{}
+	mi := &file_proto_messages_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StateSyncResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StateSyncResponse) ProtoMessage() {}
+
+func (x *StateSyncResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_messages_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StateSyncResponse.ProtoReflect.Descriptor instead.
+func (*StateSyncResponse) Descriptor() ([]byte, []int) {
+	return file_proto_messages_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *StateSyncResponse) GetResponderId() string {
+	if x != nil {
+		return x.ResponderId
+	}
+	return ""
+}
+
+func (x *StateSyncResponse) GetCurrentSequence() int64 {
+	if x != nil {
+		return x.CurrentSequence
+	}
+	return 0
+}
+
+func (x *StateSyncResponse) GetCurrentView() int64 {
+	if x != nil {
+		return x.CurrentView
+	}
+	return 0
+}
+
+func (x *StateSyncResponse) GetValidatedTickets() []*TicketState {
+	if x != nil {
+		return x.ValidatedTickets
+	}
+	return nil
+}
+
+func (x *StateSyncResponse) GetConsensusLog() []string {
+	if x != nil {
+		return x.ConsensusLog
+	}
+	return nil
+}
+
+func (x *StateSyncResponse) GetTimestamp() int64 {
+	if x != nil {
+		return x.Timestamp
+	}
+	return 0
+}
+
 var File_proto_messages_proto protoreflect.FileDescriptor
 
 const file_proto_messages_proto_rawDesc = "" +
 	"\n" +
-	"\x14proto/messages.proto\x12\tvalidator\"\xc4\x02\n" +
+	"\x14proto/messages.proto\x12\tvalidator\"\xf5\x02\n" +
 	"\x10ValidatorMessage\x124\n" +
 	"\x04type\x18\x01 \x01(\x0e2 .validator.ValidatorMessage.TypeR\x04type\x12\x18\n" +
 	"\apayload\x18\x02 \x01(\fR\apayload\x12\x1c\n" +
 	"\tsignature\x18\x03 \x01(\fR\tsignature\x12\x1c\n" +
 	"\ttimestamp\x18\x04 \x01(\x03R\ttimestamp\x12\x1b\n" +
-	"\tsender_id\x18\x05 \x01(\tR\bsenderId\"\x86\x01\n" +
+	"\tsender_id\x18\x05 \x01(\tR\bsenderId\"\xb7\x01\n" +
 	"\x04Type\x12\x0f\n" +
 	"\vPRE_PREPARE\x10\x00\x12\v\n" +
 	"\aPREPARE\x10\x01\x12\n" +
@@ -1335,7 +1487,9 @@ const file_proto_messages_proto_rawDesc = "" +
 	"CHECKPOINT\x10\x04\x12\x10\n" +
 	"\fSTATE_UPDATE\x10\x05\x12\r\n" +
 	"\tHEARTBEAT\x10\x06\x12\x12\n" +
-	"\x0eCLIENT_REQUEST\x10\a\"\x82\x01\n" +
+	"\x0eCLIENT_REQUEST\x10\a\x12\x16\n" +
+	"\x12STATE_SYNC_REQUEST\x10\b\x12\x17\n" +
+	"\x13STATE_SYNC_RESPONSE\x10\t\"\x82\x01\n" +
 	"\n" +
 	"PrePrepare\x12\x12\n" +
 	"\x04view\x18\x01 \x01(\x03R\x04view\x12\x1a\n" +
@@ -1422,7 +1576,18 @@ const file_proto_messages_proto_rawDesc = "" +
 	"\x11messages_received\x18\x02 \x01(\x03R\x10messagesReceived\x12)\n" +
 	"\x10consensus_rounds\x18\x03 \x01(\x03R\x0fconsensusRounds\x12)\n" +
 	"\x10failed_consensus\x18\x04 \x01(\x03R\x0ffailedConsensus\x12$\n" +
-	"\x0eavg_latency_ms\x18\x05 \x01(\x01R\favgLatencyMs*D\n" +
+	"\x0eavg_latency_ms\x18\x05 \x01(\x01R\favgLatencyMs\"x\n" +
+	"\x10StateSyncRequest\x12!\n" +
+	"\frequester_id\x18\x01 \x01(\tR\vrequesterId\x12#\n" +
+	"\rlast_sequence\x18\x02 \x01(\x03R\flastSequence\x12\x1c\n" +
+	"\ttimestamp\x18\x03 \x01(\x03R\ttimestamp\"\x8c\x02\n" +
+	"\x11StateSyncResponse\x12!\n" +
+	"\fresponder_id\x18\x01 \x01(\tR\vresponderId\x12)\n" +
+	"\x10current_sequence\x18\x02 \x01(\x03R\x0fcurrentSequence\x12!\n" +
+	"\fcurrent_view\x18\x03 \x01(\x03R\vcurrentView\x12C\n" +
+	"\x11validated_tickets\x18\x04 \x03(\v2\x16.validator.TicketStateR\x10validatedTickets\x12#\n" +
+	"\rconsensus_log\x18\x05 \x03(\tR\fconsensusLog\x12\x1c\n" +
+	"\ttimestamp\x18\x06 \x01(\x03R\ttimestamp*D\n" +
 	"\x0fTicketOperation\x12\f\n" +
 	"\bVALIDATE\x10\x00\x12\v\n" +
 	"\aCONSUME\x10\x01\x12\v\n" +
@@ -1449,7 +1614,7 @@ func file_proto_messages_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_messages_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
-var file_proto_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
+var file_proto_messages_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_proto_messages_proto_goTypes = []any{
 	(TicketOperation)(0),       // 0: validator.TicketOperation
 	(State)(0),                 // 1: validator.State
@@ -1470,7 +1635,9 @@ var file_proto_messages_proto_goTypes = []any{
 	(*HealthCheck)(nil),        // 16: validator.HealthCheck
 	(*NodeStatus)(nil),         // 17: validator.NodeStatus
 	(*NetworkStats)(nil),       // 18: validator.NetworkStats
-	nil,                        // 19: validator.VectorClock.ClocksEntry
+	(*StateSyncRequest)(nil),   // 19: validator.StateSyncRequest
+	(*StateSyncResponse)(nil),  // 20: validator.StateSyncResponse
+	nil,                        // 21: validator.VectorClock.ClocksEntry
 }
 var file_proto_messages_proto_depIdxs = []int32{
 	2,  // 0: validator.ValidatorMessage.type:type_name -> validator.ValidatorMessage.Type
@@ -1478,17 +1645,18 @@ var file_proto_messages_proto_depIdxs = []int32{
 	8,  // 2: validator.ViewChange.prepared:type_name -> validator.PreparedProof
 	13, // 3: validator.StateUpdate.tickets:type_name -> validator.TicketState
 	11, // 4: validator.StateUpdate.vector_clock:type_name -> validator.VectorClock
-	19, // 5: validator.VectorClock.clocks:type_name -> validator.VectorClock.ClocksEntry
+	21, // 5: validator.VectorClock.clocks:type_name -> validator.VectorClock.ClocksEntry
 	0,  // 6: validator.Request.operation:type_name -> validator.TicketOperation
 	1,  // 7: validator.TicketState.state:type_name -> validator.State
 	11, // 8: validator.TicketState.vector_clock:type_name -> validator.VectorClock
 	17, // 9: validator.HealthCheck.status:type_name -> validator.NodeStatus
 	18, // 10: validator.HealthCheck.stats:type_name -> validator.NetworkStats
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	13, // 11: validator.StateSyncResponse.validated_tickets:type_name -> validator.TicketState
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_proto_messages_proto_init() }
@@ -1502,7 +1670,7 @@ func file_proto_messages_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_messages_proto_rawDesc), len(file_proto_messages_proto_rawDesc)),
 			NumEnums:      3,
-			NumMessages:   17,
+			NumMessages:   19,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
