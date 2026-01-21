@@ -220,12 +220,22 @@ func connectToBootstrapPeers(ctx context.Context, h host.Host, bootstrapPeers []
 			connectCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel()
 
+			// If peer ID is empty, skip - we can't connect without it
+			if pi.ID == "" {
+				fmt.Printf("Discovery: ⚠️  Skipping bootstrap peer without peer ID. Address: %v\n", pi.Addrs)
+				fmt.Printf("Discovery: To connect, use full multiaddr format: /ip4/x.x.x.x/tcp/port/p2p/<peer-id>\n")
+				fmt.Printf("Discovery: Peer will be discovered via DHT instead.\n")
+				// Don't treat this as an error - DHT discovery will find peers
+				return
+			}
+
+			// Normal case: we have peer ID
 			if err := h.Connect(connectCtx, pi); err != nil {
 				errChan <- fmt.Errorf("failed to connect to bootstrap peer %s: %w", pi.ID, err)
 				return
 			}
 
-			fmt.Printf("Connected to bootstrap peer %s\n", pi.ID)
+			fmt.Printf("Discovery: ✅ Connected to bootstrap peer %s\n", pi.ID)
 		}(peerInfo)
 	}
 
