@@ -257,6 +257,50 @@ func (n *ValidatorNode) Start() error {
 		return fmt.Errorf("failed to start discovery: %w", err)
 	}
 
+	// Wait for initial peer connections (if multi-node setup)
+	expectedPeers := n.totalNodes - 1 // All nodes except self
+	if expectedPeers > 0 {
+		fmt.Printf("\n⏳ Waiting for peer connections (expected %d peers)...\n", expectedPeers)
+
+		// Wait up to 15 seconds, checking every second
+		maxWaitTime := 15 * time.Second
+		checkInterval := 1 * time.Second
+		startTime := time.Now()
+
+		for time.Since(startTime) < maxWaitTime {
+			connectedPeers := n.p2pHost.GetPeerCount()
+
+			if connectedPeers >= expectedPeers {
+				fmt.Printf("✅ All peers connected (%d/%d) - ready to accept requests\n\n", connectedPeers, expectedPeers)
+				break
+			}
+
+			// Log progress every 3 seconds
+			elapsed := time.Since(startTime)
+			if int(elapsed.Seconds())%3 == 0 && elapsed > 0 {
+				fmt.Printf("   Connected to %d/%d peers (waiting %ds)...\n", connectedPeers, expectedPeers, int(elapsed.Seconds()))
+			}
+
+			time.Sleep(checkInterval)
+		}
+
+		// Final check
+		finalPeerCount := n.p2pHost.GetPeerCount()
+		if finalPeerCount == 0 {
+			fmt.Printf("⚠️  WARNING: No peers connected after %ds!\n", int(maxWaitTime.Seconds()))
+			fmt.Printf("⚠️  Node will start but consensus may fail until peers connect.\n")
+			fmt.Printf("⚠️  Check:\n")
+			fmt.Printf("     1. Other nodes are running\n")
+			fmt.Printf("     2. Bootstrap address is correct (must include peer ID)\n")
+			fmt.Printf("     3. Network connectivity between nodes\n\n")
+		} else if finalPeerCount < expectedPeers {
+			fmt.Printf("⚠️  WARNING: Only %d/%d peers connected after %ds\n", finalPeerCount, expectedPeers, int(maxWaitTime.Seconds()))
+			fmt.Printf("⚠️  Continuing startup, but consensus requires at least %d nodes for quorum\n\n", 2*((expectedPeers+1)/3)+1)
+		}
+	} else {
+		fmt.Printf("✅ Single-node mode - no peers expected\n\n")
+	}
+
 	// Start gossip engine
 	n.gossipEngine.Start()
 
