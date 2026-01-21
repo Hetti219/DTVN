@@ -347,6 +347,62 @@ func (sm *StateMachine) GetVectorClock() *VectorClock {
 	return sm.vectorClock.Copy()
 }
 
+// HasTicket checks if a ticket exists in the state
+func (sm *StateMachine) HasTicket(ticketID string) bool {
+	sm.mu.RLock()
+	defer sm.mu.RUnlock()
+	_, exists := sm.currentState[ticketID]
+	return exists
+}
+
+// SyncTicket synchronizes a ticket from another node (bypassing consensus)
+// This is used when a node joins and needs to catch up with existing state
+func (sm *StateMachine) SyncTicket(ticketID string, validatorID string, data []byte) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	// Check if ticket already exists
+	if _, exists := sm.currentState[ticketID]; exists {
+		return fmt.Errorf("ticket %s already exists", ticketID)
+	}
+
+	// Create ticket directly in validated state
+	ticket := &Ticket{
+		ID:          ticketID,
+		State:       StateValidated,
+		Data:        data,
+		ValidatorID: validatorID,
+		Timestamp:   time.Now().Unix(),
+		VectorClock: sm.vectorClock.Copy(),
+		Metadata:    make(map[string]string),
+	}
+
+	// Add synced flag to metadata
+	ticket.Metadata["synced"] = "true"
+	ticket.Metadata["synced_from"] = validatorID
+
+	// Store ticket
+	sm.currentState[ticketID] = ticket
+
+	// Record transition
+	sm.transitions = append(sm.transitions, StateTransition{
+		TicketID:    ticketID,
+		FromState:   StateIssued,
+		ToState:     StateValidated,
+		ValidatorID: validatorID,
+		Timestamp:   ticket.Timestamp,
+	})
+
+	// Notify handlers (but not publishers - this is already published elsewhere)
+	for _, handler := range sm.handlers {
+		if err := handler(ticket, StateIssued, StateValidated); err != nil {
+			return fmt.Errorf("handler error: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // Helper functions
 
 func copyMetadata(metadata map[string]string) map[string]string {
