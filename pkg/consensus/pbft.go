@@ -187,6 +187,8 @@ func (n *PBFTNode) ProposeRequest(req *Request) error {
 		return fmt.Errorf("only primary can propose requests")
 	}
 
+	fmt.Printf("PBFT: Node %s proposing request for ticket %s (op: %s)\n", n.nodeID, req.TicketID, req.Operation)
+
 	// Increment sequence number
 	n.sequence++
 	seq := n.sequence
@@ -196,6 +198,8 @@ func (n *PBFTNode) ProposeRequest(req *Request) error {
 
 	// Create digest
 	digest := n.computeDigest(req)
+
+	fmt.Printf("PBFT: Created PRE-PREPARE for seq %d, view %d\n", seq, n.view)
 
 	// Create PRE-PREPARE message
 	prePrepare := &PrePrepareMsg{
@@ -283,6 +287,11 @@ func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 		}
 	}()
 
+	// Check if we already have quorum (important for single-node case)
+	if n.checkPrepareQuorum(msg.Sequence) {
+		return n.moveToCommitPhase(msg.Sequence, msg.Digest)
+	}
+
 	return nil
 }
 
@@ -338,14 +347,30 @@ func (n *PBFTNode) HandleCommit(msg *CommitMsg) error {
 func (n *PBFTNode) checkPrepareQuorum(sequence int64) bool {
 	prepares := n.prepareLog[sequence]
 	required := 2*n.f + 1
-	return len(prepares) >= required
+	// Ensure at least 1 is required even for single node
+	if required < 1 {
+		required = 1
+	}
+	hasQuorum := len(prepares) >= required
+	if hasQuorum {
+		fmt.Printf("PBFT: Prepare quorum reached for seq %d (%d/%d messages)\n", sequence, len(prepares), required)
+	}
+	return hasQuorum
 }
 
 // checkCommitQuorum checks if we have enough COMMIT messages
 func (n *PBFTNode) checkCommitQuorum(sequence int64) bool {
 	commits := n.commitLog[sequence]
 	required := 2*n.f + 1
-	return len(commits) >= required
+	// Ensure at least 1 is required even for single node
+	if required < 1 {
+		required = 1
+	}
+	hasQuorum := len(commits) >= required
+	if hasQuorum {
+		fmt.Printf("PBFT: Commit quorum reached for seq %d (%d/%d messages)\n", sequence, len(commits), required)
+	}
+	return hasQuorum
 }
 
 // moveToCommitPhase moves to the commit phase
@@ -385,6 +410,11 @@ func (n *PBFTNode) moveToCommitPhase(sequence int64, digest string) error {
 		}
 	}()
 
+	// Check if we already have quorum (important for single-node case)
+	if n.checkCommitQuorum(sequence) {
+		return n.executeRequest(sequence)
+	}
+
 	return nil
 }
 
@@ -395,14 +425,19 @@ func (n *PBFTNode) executeRequest(sequence int64) error {
 		return fmt.Errorf("request not found for sequence %d", sequence)
 	}
 
+	fmt.Printf("PBFT: ✅ Consensus reached for seq %d, executing request for ticket %s\n", sequence, req.TicketID)
+
 	n.state = StateCommitted
 
 	// Call registered handlers
 	for _, handler := range n.handlers {
 		if err := handler(req); err != nil {
-			fmt.Printf("Handler error: %v\n", err)
+			fmt.Printf("PBFT: Handler error: %v\n", err)
+			return err
 		}
 	}
+
+	fmt.Printf("PBFT: ✅ Request executed successfully for ticket %s\n", req.TicketID)
 
 	// Reset to idle
 	n.state = StateIdle
@@ -466,11 +501,16 @@ func (n *PBFTNode) initiateViewChange() {
 	defer n.mu.Unlock()
 
 	n.view++
-	newPrimary := n.view % int64(n.totalNodes)
 
-	n.isPrimary = (newPrimary == 0 && n.nodeID == "node0") // Simplified
+	// Calculate which node should be primary for this view
+	primaryIndex := n.view % int64(n.totalNodes)
+	expectedPrimaryID := fmt.Sprintf("node%d", primaryIndex)
 
-	fmt.Printf("Node %s: View change to view %d, isPrimary: %v\n", n.nodeID, n.view, n.isPrimary)
+	// Update isPrimary based on whether this node matches the expected primary
+	n.isPrimary = (n.nodeID == expectedPrimaryID)
+
+	fmt.Printf("Node %s: View change to view %d, primary should be %s, isPrimary: %v\n",
+		n.nodeID, n.view, expectedPrimaryID, n.isPrimary)
 
 	// Reset state
 	n.state = StateIdle
