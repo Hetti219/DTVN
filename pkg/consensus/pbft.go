@@ -181,9 +181,9 @@ func (n *PBFTNode) Start() {
 // ProposeRequest proposes a new request (only primary can call this)
 func (n *PBFTNode) ProposeRequest(req *Request) error {
 	n.mu.Lock()
-	defer n.mu.Unlock()
 
 	if !n.isPrimary {
+		n.mu.Unlock()
 		return fmt.Errorf("only primary can propose requests")
 	}
 
@@ -209,6 +209,9 @@ func (n *PBFTNode) ProposeRequest(req *Request) error {
 		Request:  req,
 	}
 
+	// Unlock before serialization and broadcasting
+	n.mu.Unlock()
+
 	// Broadcast PRE-PREPARE using protobuf
 	payload, err := SerializePrePrepare(prePrepare)
 	if err != nil {
@@ -228,7 +231,7 @@ func (n *PBFTNode) ProposeRequest(req *Request) error {
 		}
 	}()
 
-	// Process locally
+	// Process locally (handlePrePrepare will acquire its own lock)
 	return n.handlePrePrepare(prePrepare)
 }
 
@@ -499,6 +502,16 @@ func (n *PBFTNode) monitorViewTimeout() {
 func (n *PBFTNode) initiateViewChange() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+
+	// Only trigger view change if there's a pending consensus operation
+	// If the node is idle, just reset the timer and continue
+	if n.state == StateIdle {
+		n.viewTimer.Reset(5 * time.Second)
+		return
+	}
+
+	// There's a pending request that hasn't completed - trigger view change
+	fmt.Printf("Node %s: View timeout while in state %s, initiating view change\n", n.nodeID, n.state)
 
 	n.view++
 
