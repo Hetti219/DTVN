@@ -80,17 +80,20 @@ run-bootstrap:
 		-primary \
 		-total-nodes 7
 
+# Deterministic peer ID for node0 (derived from node ID "node0")
+NODE0_PEER_ID := 12D3KooWLtBkKrip2jyaRzhUphqYyVXGUPMMbmpBWHZMYXaueb9C
+
 # Run a network of 4 validator nodes
 run-network:
 	@echo "Starting validator network..."
 	@mkdir -p data/node0 data/node1 data/node2 data/node3
 	$(GO) run cmd/validator/main.go -id node0 -port 4001 -api-port 8081 -data-dir ./data/node0 -primary -total-nodes 4 & \
+	sleep 3 && \
+	$(GO) run cmd/validator/main.go -id node1 -port 4002 -api-port 8082 -data-dir ./data/node1 -total-nodes 4 -bootstrap "/ip4/127.0.0.1/tcp/4001/p2p/$(NODE0_PEER_ID)" & \
 	sleep 2 && \
-	$(GO) run cmd/validator/main.go -id node1 -port 4002 -api-port 8082 -data-dir ./data/node1 -total-nodes 4 -bootstrap "/ip4/127.0.0.1/tcp/4001" & \
+	$(GO) run cmd/validator/main.go -id node2 -port 4003 -api-port 8083 -data-dir ./data/node2 -total-nodes 4 -bootstrap "/ip4/127.0.0.1/tcp/4001/p2p/$(NODE0_PEER_ID)" & \
 	sleep 2 && \
-	$(GO) run cmd/validator/main.go -id node2 -port 4003 -api-port 8083 -data-dir ./data/node2 -total-nodes 4 -bootstrap "/ip4/127.0.0.1/tcp/4001" & \
-	sleep 2 && \
-	$(GO) run cmd/validator/main.go -id node3 -port 4004 -api-port 8084 -data-dir ./data/node3 -total-nodes 4 -bootstrap "/ip4/127.0.0.1/tcp/4001"
+	$(GO) run cmd/validator/main.go -id node3 -port 4004 -api-port 8084 -data-dir ./data/node3 -total-nodes 4 -bootstrap "/ip4/127.0.0.1/tcp/4001/p2p/$(NODE0_PEER_ID)"
 
 # Run simulator
 run-simulator:
