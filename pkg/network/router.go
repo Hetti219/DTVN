@@ -11,8 +11,9 @@ import (
 
 // MessageRouter routes incoming network messages to appropriate handlers
 type MessageRouter struct {
-	pbftHandler  PBFTHandler
-	stateHandler StateHandler
+	pbftHandler      PBFTHandler
+	stateHandler     StateHandler
+	stateSyncHandler StateSyncHandler
 }
 
 // PBFTHandler processes PBFT consensus messages
@@ -20,6 +21,9 @@ type PBFTHandler func(msgType pb.ValidatorMessage_Type, payload []byte) error
 
 // StateHandler processes state synchronization messages
 type StateHandler func(update *pb.StateUpdate) error
+
+// StateSyncHandler processes state sync messages (request/response)
+type StateSyncHandler func(msgType pb.ValidatorMessage_Type, payload []byte) error
 
 // NewMessageRouter creates a new message router
 func NewMessageRouter() *MessageRouter {
@@ -34,6 +38,11 @@ func (r *MessageRouter) RegisterPBFTHandler(handler PBFTHandler) {
 // RegisterStateHandler registers the state synchronization handler
 func (r *MessageRouter) RegisterStateHandler(handler StateHandler) {
 	r.stateHandler = handler
+}
+
+// RegisterStateSyncHandler registers the state sync request/response handler
+func (r *MessageRouter) RegisterStateSyncHandler(handler StateSyncHandler) {
+	r.stateSyncHandler = handler
 }
 
 // RouteMessage routes a message to the appropriate handler based on its type
@@ -69,6 +78,13 @@ func (r *MessageRouter) RouteMessage(data []byte, senderID peer.ID) error {
 
 		return r.stateHandler(stateUpdate)
 
+	case pb.ValidatorMessage_CLIENT_REQUEST:
+		// Route to PBFT handler for client request forwarding
+		if r.pbftHandler == nil {
+			return fmt.Errorf("no PBFT handler registered")
+		}
+		return r.pbftHandler(msg.Type, msg.Payload)
+
 	case pb.ValidatorMessage_VIEW_CHANGE:
 		// TODO: Implement view change handling
 		fmt.Printf("Received VIEW_CHANGE message from %s (not yet implemented)\n", senderID)
@@ -83,6 +99,14 @@ func (r *MessageRouter) RouteMessage(data []byte, senderID peer.ID) error {
 		// TODO: Implement heartbeat handling
 		fmt.Printf("Received HEARTBEAT message from %s (not yet implemented)\n", senderID)
 		return nil
+
+	case pb.ValidatorMessage_STATE_SYNC_REQUEST,
+		pb.ValidatorMessage_STATE_SYNC_RESPONSE:
+		// Route to state sync handler
+		if r.stateSyncHandler == nil {
+			return fmt.Errorf("no state sync handler registered")
+		}
+		return r.stateSyncHandler(msg.Type, msg.Payload)
 
 	default:
 		return fmt.Errorf("unknown message type: %v from peer %s", msg.Type, senderID)

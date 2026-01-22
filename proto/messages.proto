@@ -14,6 +14,9 @@ message ValidatorMessage {
     CHECKPOINT = 4;
     STATE_UPDATE = 5;
     HEARTBEAT = 6;
+    CLIENT_REQUEST = 7;
+    STATE_SYNC_REQUEST = 8;
+    STATE_SYNC_RESPONSE = 9;
   }
   Type type = 1;
   bytes payload = 2;
@@ -158,4 +161,21 @@ message NetworkStats {
   int64 consensus_rounds = 3;
   int64 failed_consensus = 4;
   double avg_latency_ms = 5;
+}
+
+// StateSyncRequest message for requesting state from peers
+message StateSyncRequest {
+  string requester_id = 1;
+  int64 last_sequence = 2;  // Last sequence number the requester has
+  int64 timestamp = 3;
+}
+
+// StateSyncResponse message for responding to state sync requests
+message StateSyncResponse {
+  string responder_id = 1;
+  int64 current_sequence = 2;
+  int64 current_view = 3;
+  repeated TicketState validated_tickets = 4;
+  repeated string consensus_log = 5;  // Simplified consensus log (ticket IDs)
+  int64 timestamp = 6;
 }

@@ -104,19 +104,22 @@ Using the Makefile:
 make run-network
 ```
 
-Or manually:
+Or manually (peer IDs are deterministic based on node ID):
 ```bash
 # Terminal 1: Primary node
 ./bin/validator -id node0 -port 4001 -api-port 8081 -data-dir ./data/node0 -primary -total-nodes 4
 
-# Terminal 2: Validator node 1
-./bin/validator -id node1 -port 4002 -api-port 8082 -data-dir ./data/node1 -total-nodes 4 -bootstrap "/ip4/127.0.0.1/tcp/4001"
+# Terminal 2: Validator node 1 (node0's peer ID is deterministic)
+./bin/validator -id node1 -port 4002 -api-port 8082 -data-dir ./data/node1 -total-nodes 4 \
+  -bootstrap "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWLtBkKrip2jyaRzhUphqYyVXGUPMMbmpBWHZMYXaueb9C"
 
 # Terminal 3: Validator node 2
-./bin/validator -id node2 -port 4003 -api-port 8083 -data-dir ./data/node2 -total-nodes 4 -bootstrap "/ip4/127.0.0.1/tcp/4001"
+./bin/validator -id node2 -port 4003 -api-port 8083 -data-dir ./data/node2 -total-nodes 4 \
+  -bootstrap "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWLtBkKrip2jyaRzhUphqYyVXGUPMMbmpBWHZMYXaueb9C"
 
 # Terminal 4: Validator node 3
-./bin/validator -id node3 -port 4004 -api-port 8084 -data-dir ./data/node3 -total-nodes 4 -bootstrap "/ip4/127.0.0.1/tcp/4001"
+./bin/validator -id node3 -port 4004 -api-port 8084 -data-dir ./data/node3 -total-nodes 4 \
+  -bootstrap "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWLtBkKrip2jyaRzhUphqYyVXGUPMMbmpBWHZMYXaueb9C"
 ```
 
 ### Using Docker Compose

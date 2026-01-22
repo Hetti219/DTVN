@@ -3,6 +3,7 @@ package network
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"sync"
 
@@ -53,6 +54,44 @@ type Config struct {
 	PrivateKey    crypto.PrivKey
 	BootstrapMode bool
 	DataDir       string
+	NodeID        string // Used for deterministic key generation
+}
+
+// GenerateDeterministicKey generates a deterministic Ed25519 private key from a node ID.
+// This ensures that the same node ID always produces the same peer ID.
+func GenerateDeterministicKey(nodeID string) (crypto.PrivKey, error) {
+	// Create a deterministic seed from the node ID
+	// Using a fixed salt to ensure reproducibility
+	salt := "dtvn-validator-key-v1"
+	seed := sha256.Sum256([]byte(salt + nodeID))
+
+	// Generate Ed25519 key from the deterministic seed
+	// Ed25519 keys are derived from a 32-byte seed
+	privKey, _, err := crypto.GenerateEd25519Key(
+		&deterministicReader{seed: seed[:]},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate deterministic key: %w", err)
+	}
+
+	return privKey, nil
+}
+
+// deterministicReader implements io.Reader using a fixed seed
+type deterministicReader struct {
+	seed []byte
+	pos  int
+}
+
+func (r *deterministicReader) Read(p []byte) (n int, err error) {
+	// Extend the seed if needed by hashing
+	for len(r.seed)-r.pos < len(p) {
+		hash := sha256.Sum256(r.seed)
+		r.seed = append(r.seed, hash[:]...)
+	}
+	n = copy(p, r.seed[r.pos:])
+	r.pos += n
+	return n, nil
 }
 
 // NewP2PHost creates a new libp2p host with the specified configuration
@@ -61,9 +100,18 @@ func NewP2PHost(ctx context.Context, cfg *Config) (*P2PHost, error) {
 	privKey := cfg.PrivateKey
 	if privKey == nil {
 		var err error
-		privKey, _, err = crypto.GenerateKeyPairWithReader(crypto.Ed25519, 2048, rand.Reader)
-		if err != nil {
-			return nil, fmt.Errorf("failed to generate key pair: %w", err)
+		// Use deterministic key generation if NodeID is provided
+		if cfg.NodeID != "" {
+			privKey, err = GenerateDeterministicKey(cfg.NodeID)
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate deterministic key: %w", err)
+			}
+		} else {
+			// Fallback to random key generation
+			privKey, _, err = crypto.GenerateKeyPairWithReader(crypto.Ed25519, 2048, rand.Reader)
+			if err != nil {
+				return nil, fmt.Errorf("failed to generate key pair: %w", err)
+			}
 		}
 	}
 
@@ -105,6 +153,33 @@ func NewP2PHost(ctx context.Context, cfg *Config) (*P2PHost, error) {
 
 	// Set up stream handler
 	h.SetStreamHandler(ProtocolID, p2pHost.handleStream)
+
+	// Set up network notification handler to track peer connections
+	h.Network().Notify(&network.NotifyBundle{
+		ConnectedF: func(n network.Network, conn network.Conn) {
+			peerID := conn.RemotePeer()
+			p2pHost.mu.Lock()
+			if _, exists := p2pHost.peers[peerID]; !exists {
+				p2pHost.peers[peerID] = &PeerConnection{
+					ID:          peerID,
+					Addrs:       []multiaddr.Multiaddr{conn.RemoteMultiaddr()},
+					IsValidator: true,
+				}
+				fmt.Printf("P2P: ✅ Peer connected: %s\n", peerID)
+			}
+			p2pHost.mu.Unlock()
+		},
+		DisconnectedF: func(n network.Network, conn network.Conn) {
+			peerID := conn.RemotePeer()
+			// Only remove if no other connections to this peer
+			if len(n.ConnsToPeer(peerID)) == 0 {
+				p2pHost.mu.Lock()
+				delete(p2pHost.peers, peerID)
+				p2pHost.mu.Unlock()
+				fmt.Printf("P2P: ❌ Peer disconnected: %s\n", peerID)
+			}
+		},
+	})
 
 	return p2pHost, nil
 }
@@ -194,23 +269,44 @@ func (p *P2PHost) Broadcast(ctx context.Context, data []byte) error {
 	for peerID := range p.peers {
 		peers = append(peers, peerID)
 	}
+	peerCount := len(peers)
 	p.mu.RUnlock()
+
+	// Log broadcast attempt
+	fmt.Printf("P2P: Broadcasting message to %d peer(s)\n", peerCount)
+
+	// Warn if no peers (important visibility for debugging)
+	if peerCount == 0 {
+		fmt.Printf("P2P: ⚠️  WARNING - Broadcasting to ZERO peers, message will not propagate!\n")
+	}
 
 	var wg sync.WaitGroup
 	errChan := make(chan error, len(peers))
+	successCount := 0
+	var successMu sync.Mutex
 
 	for _, peerID := range peers {
 		wg.Add(1)
 		go func(pid peer.ID) {
 			defer wg.Done()
 			if err := p.SendMessage(ctx, pid, data); err != nil {
+				fmt.Printf("P2P: Failed to send to peer %s: %v\n", pid, err)
 				errChan <- err
+			} else {
+				successMu.Lock()
+				successCount++
+				successMu.Unlock()
 			}
 		}(peerID)
 	}
 
 	wg.Wait()
 	close(errChan)
+
+	// Log success summary
+	if peerCount > 0 {
+		fmt.Printf("P2P: ✅ Successfully broadcast to %d/%d peer(s)\n", successCount, peerCount)
+	}
 
 	// Return first error if any
 	for err := range errChan {

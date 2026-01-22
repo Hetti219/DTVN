@@ -127,6 +127,7 @@ type ConsensusHandler func(*Request) error
 type MessageBroadcaster interface {
 	Broadcast(ctx context.Context, data []byte) error
 	SendTo(ctx context.Context, nodeID string, data []byte) error
+	GetPeerCount() int
 }
 
 // Config holds PBFT configuration
@@ -181,13 +182,41 @@ func (n *PBFTNode) Start() {
 // ProposeRequest proposes a new request (only primary can call this)
 func (n *PBFTNode) ProposeRequest(req *Request) error {
 	n.mu.Lock()
-	defer n.mu.Unlock()
 
 	if !n.isPrimary {
+		n.mu.Unlock()
 		return fmt.Errorf("only primary can propose requests")
 	}
 
-	fmt.Printf("PBFT: Node %s proposing request for ticket %s (op: %s)\n", n.nodeID, req.TicketID, req.Operation)
+	// Verify we can reach quorum with connected peers
+	currentPeerCount := n.broadcaster.GetPeerCount()
+	// Total active nodes = connected peers + self
+	activeNodes := currentPeerCount + 1
+	// Quorum requirement: 2f + 1 nodes must respond
+	requiredQuorum := 2*n.f + 1
+
+	// Special case: single node setup (totalNodes = 1)
+	if n.totalNodes == 1 {
+		// Single node can always reach quorum (itself)
+		fmt.Printf("PBFT: Node %s proposing request for ticket %s (op: %s) [single-node mode]\n", n.nodeID, req.TicketID, req.Operation)
+	} else {
+		// Multi-node setup: check if we have enough peers
+		if activeNodes < requiredQuorum {
+			n.mu.Unlock()
+			return fmt.Errorf("insufficient peers for consensus: have %d nodes (including self), need %d for quorum (connected peers: %d, expected: %d)",
+				activeNodes, requiredQuorum, currentPeerCount, n.totalNodes-1)
+		}
+
+		// Warn if we don't have all expected peers
+		expectedPeers := n.totalNodes - 1
+		if currentPeerCount < expectedPeers {
+			fmt.Printf("PBFT: ⚠️  WARNING - Node %s proposing with only %d/%d peers connected (can reach quorum but not all nodes present)\n",
+				n.nodeID, currentPeerCount, expectedPeers)
+		}
+
+		fmt.Printf("PBFT: Node %s proposing request for ticket %s (op: %s) [active nodes: %d/%d, quorum: %d]\n",
+			n.nodeID, req.TicketID, req.Operation, activeNodes, n.totalNodes, requiredQuorum)
+	}
 
 	// Increment sequence number
 	n.sequence++
@@ -209,6 +238,9 @@ func (n *PBFTNode) ProposeRequest(req *Request) error {
 		Request:  req,
 	}
 
+	// Unlock before serialization and broadcasting
+	n.mu.Unlock()
+
 	// Broadcast PRE-PREPARE using protobuf
 	payload, err := SerializePrePrepare(prePrepare)
 	if err != nil {
@@ -220,6 +252,8 @@ func (n *PBFTNode) ProposeRequest(req *Request) error {
 		fmt.Printf("Failed to wrap PRE-PREPARE message: %v\n", err)
 		return err
 	}
+
+	fmt.Printf("PBFT: Node %s broadcasting PRE-PREPARE for seq %d\n", n.nodeID, seq)
 	go func() {
 		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
 		defer cancel()
@@ -228,7 +262,7 @@ func (n *PBFTNode) ProposeRequest(req *Request) error {
 		}
 	}()
 
-	// Process locally
+	// Process locally (handlePrePrepare will acquire its own lock)
 	return n.handlePrePrepare(prePrepare)
 }
 
@@ -236,6 +270,9 @@ func (n *PBFTNode) ProposeRequest(req *Request) error {
 func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
+
+	fmt.Printf("PBFT: Node %s received PRE-PREPARE for seq %d, view %d, ticket %s\n",
+		n.nodeID, msg.Sequence, msg.View, msg.Request.TicketID)
 
 	// Validate view
 	if msg.View != n.view {
@@ -253,6 +290,8 @@ func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 
 	// Update state
 	n.state = StatePrepare
+
+	fmt.Printf("PBFT: Node %s moving to PREPARE phase for seq %d\n", n.nodeID, msg.Sequence)
 
 	// Send PREPARE message
 	prepare := &PrepareMsg{
@@ -279,6 +318,8 @@ func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 		fmt.Printf("Failed to wrap PREPARE message: %v\n", err)
 		return err
 	}
+
+	fmt.Printf("PBFT: Node %s broadcasting PREPARE for seq %d\n", n.nodeID, msg.Sequence)
 	go func() {
 		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
 		defer cancel()
@@ -311,6 +352,16 @@ func (n *PBFTNode) HandlePrepare(msg *PrepareMsg) error {
 	}
 	n.prepareLog[msg.Sequence][msg.NodeID] = msg
 
+	// Calculate quorum requirement
+	required := 2*n.f + 1
+	if required < 1 {
+		required = 1
+	}
+	current := len(n.prepareLog[msg.Sequence])
+
+	fmt.Printf("PBFT: Node %s received PREPARE from %s for seq %d (progress: %d/%d)\n",
+		n.nodeID, msg.NodeID, msg.Sequence, current, required)
+
 	// Check if we have quorum (2f+1 PREPARE messages)
 	if n.checkPrepareQuorum(msg.Sequence) {
 		return n.moveToCommitPhase(msg.Sequence, msg.Digest)
@@ -334,6 +385,16 @@ func (n *PBFTNode) HandleCommit(msg *CommitMsg) error {
 		n.commitLog[msg.Sequence] = make(map[string]*CommitMsg)
 	}
 	n.commitLog[msg.Sequence][msg.NodeID] = msg
+
+	// Calculate quorum requirement
+	required := 2*n.f + 1
+	if required < 1 {
+		required = 1
+	}
+	current := len(n.commitLog[msg.Sequence])
+
+	fmt.Printf("PBFT: Node %s received COMMIT from %s for seq %d (progress: %d/%d)\n",
+		n.nodeID, msg.NodeID, msg.Sequence, current, required)
 
 	// Check if we have quorum (2f+1 COMMIT messages)
 	if n.checkCommitQuorum(msg.Sequence) {
@@ -377,6 +438,8 @@ func (n *PBFTNode) checkCommitQuorum(sequence int64) bool {
 func (n *PBFTNode) moveToCommitPhase(sequence int64, digest string) error {
 	n.state = StateCommit
 
+	fmt.Printf("PBFT: Node %s moving to COMMIT phase for seq %d\n", n.nodeID, sequence)
+
 	// Send COMMIT message
 	commit := &CommitMsg{
 		View:     n.view,
@@ -402,6 +465,8 @@ func (n *PBFTNode) moveToCommitPhase(sequence int64, digest string) error {
 		fmt.Printf("Failed to wrap COMMIT message: %v\n", err)
 		return err
 	}
+
+	fmt.Printf("PBFT: Node %s broadcasting COMMIT for seq %d\n", n.nodeID, sequence)
 	go func() {
 		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
 		defer cancel()
@@ -500,6 +565,16 @@ func (n *PBFTNode) initiateViewChange() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
+	// Only trigger view change if there's a pending consensus operation
+	// If the node is idle, just reset the timer and continue
+	if n.state == StateIdle {
+		n.viewTimer.Reset(5 * time.Second)
+		return
+	}
+
+	// There's a pending request that hasn't completed - trigger view change
+	fmt.Printf("Node %s: View timeout while in state %s, initiating view change\n", n.nodeID, n.state)
+
 	n.view++
 
 	// Calculate which node should be primary for this view
@@ -563,6 +638,22 @@ func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
 		msg, err = DeserializePrepare(payload)
 	case 2: // COMMIT
 		msg, err = DeserializeCommit(payload)
+	case 7: // CLIENT_REQUEST - forwarded from non-primary node
+		// Deserialize the request
+		req, err := DeserializeRequest(payload)
+		if err != nil {
+			return fmt.Errorf("failed to deserialize client request: %w", err)
+		}
+
+		// Only primary should receive and process forwarded client requests
+		if !n.IsPrimary() {
+			return fmt.Errorf("received client request but not primary")
+		}
+
+		fmt.Printf("PBFT: Primary %s received forwarded client request for ticket %s\n", n.nodeID, req.TicketID)
+
+		// Propose the request through consensus
+		return n.ProposeRequest(req)
 	default:
 		return fmt.Errorf("unsupported PBFT message type: %d", msgType)
 	}
