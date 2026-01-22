@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -71,10 +72,16 @@ func main() {
 		TotalNodes:  *totalNodes,
 	}
 
-	// Parse bootstrap peers
+	// Parse bootstrap peers (comma-separated)
 	if *bootstrapPeers != "" {
-		// Simple parsing - in production, use proper parsing
-		cfg.BootstrapPeers = []string{*bootstrapPeers}
+		// Split by comma to allow multiple bootstrap peers
+		peers := strings.Split(*bootstrapPeers, ",")
+		for _, p := range peers {
+			trimmed := strings.TrimSpace(p)
+			if trimmed != "" {
+				cfg.BootstrapPeers = append(cfg.BootstrapPeers, trimmed)
+			}
+		}
 	}
 
 	// Create and start validator node
@@ -131,11 +138,12 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 		return nil, fmt.Errorf("failed to initialize storage: %w", err)
 	}
 
-	// Initialize P2P host
+	// Initialize P2P host with deterministic key based on node ID
 	p2pHost, err := network.NewP2PHost(ctx, &network.Config{
 		ListenPort:    cfg.ListenPort,
 		BootstrapMode: cfg.IsBootstrap,
 		DataDir:       cfg.DataDir,
+		NodeID:        cfg.NodeID, // Enable deterministic peer ID
 	})
 	if err != nil {
 		store.Close()
@@ -713,6 +721,14 @@ func (n *ValidatorNode) handleStateSyncResponse(payload []byte) error {
 // API interface implementation (for api.ValidatorInterface)
 
 func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
+	// Check if ticket is already validated (early rejection to avoid consensus overhead)
+	if n.stateMachine.HasTicket(ticketID) {
+		ticket, err := n.stateMachine.GetTicket(ticketID)
+		if err == nil && ticket != nil && ticket.State == state.StateValidated {
+			return fmt.Errorf("ticket %s already validated", ticketID)
+		}
+	}
+
 	// Create consensus request
 	req := &consensus.Request{
 		RequestID: fmt.Sprintf("%s-%d", n.nodeID, time.Now().Unix()),
