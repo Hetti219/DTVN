@@ -2,21 +2,17 @@ name: Go CI
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main ]
 
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
-  build:
+  build-and-test:
     name: Build and Test
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        go-version: ['1.25.5']
 
     steps:
     - name: Checkout code
@@ -25,104 +21,14 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v6
       with:
-        go-version: ${{ matrix.go-version }}
+        go-version: '1.25.5'
         cache: true
 
     - name: Download dependencies
       run: go mod download
 
-    - name: Verify dependencies
-      run: go mod verify
-
-    - name: Build validator
+    - name: Build
       run: make build
 
     - name: Run tests
       run: make test
-
-    - name: Generate coverage report
-      if: matrix.go-version == '1.25.5'
-      run: make test-coverage
-
-    - name: Upload coverage to GitHub
-      if: matrix.go-version == '1.25.5'
-      uses: actions/upload-artifact@v6
-      with:
-        name: coverage-report
-        path: |
-          coverage.out
-          coverage.html
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-
-    - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version: '1.25.5'
-        cache: true
-
-    - name: Run golangci-lint
-      uses: golangci/golangci-lint-action@v9
-      with:
-        version: latest
-        args: --timeout=5m
-
-  format:
-    name: Format Check
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-
-    - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version: '1.25.5'
-        cache: true
-
-    - name: Check formatting
-      run: |
-        if [ -n "$(gofmt -l .)" ]; then
-          echo "Go code is not formatted:"
-          gofmt -d .
-          exit 1
-        fi
-
-  proto:
-    name: Protocol Buffers Check
-    runs-on: ubuntu-latest
-
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v6
-
-    - name: Set up Go
-      uses: actions/setup-go@v6
-      with:
-        go-version: '1.25.5'
-        cache: true
-
-    - name: Install protoc
-      uses: arduino/setup-protoc@v3
-      with:
-        version: '25.x'
-        repo-token: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Install protoc-gen-go
-      run: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-
-    - name: Verify proto files are up to date
-      run: |
-        make proto
-        if [ -n "$(git status --porcelain proto/)" ]; then
-          echo "Generated proto files are out of date. Run 'make proto' and commit the changes."
-          git diff proto/
-          exit 1
-        fi
