@@ -24,6 +24,15 @@ export class API {
                 throw new Error(data.error || `HTTP ${response.status}: ${response.statusText}`);
             }
 
+            // Backend wraps responses in {success, message, data, error} format
+            // Return the data field if it exists, otherwise return the whole response
+            if (data && typeof data === 'object' && 'success' in data) {
+                if (!data.success) {
+                    throw new Error(data.error || 'Request failed');
+                }
+                return data.data !== undefined ? data.data : data;
+            }
+
             return data;
         } catch (error) {
             console.error(`API request failed: ${endpoint}`, error);

@@ -64,9 +64,10 @@ export class Metrics {
 
     async loadMetrics() {
         try {
-            const response = await this.api.getStats();
-            if (response.success && response.data) {
-                this.updateMetrics(response.data);
+            const stats = await this.api.getStats();
+            // API client now unwraps the response automatically
+            if (stats) {
+                this.updateMetrics(stats);
             }
         } catch (error) {
             console.error('Failed to load metrics:', error);

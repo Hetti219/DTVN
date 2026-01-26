@@ -110,13 +110,12 @@ export class TicketManager {
             resultDiv.innerHTML = '<div class="alert alert-info">Validating ticket...</div>';
 
             const dataBytes = data ? new TextEncoder().encode(JSON.stringify(data)) : null;
-            const response = await this.api.validateTicket(ticketID, dataBytes);
+            await this.api.validateTicket(ticketID, dataBytes);
 
-            if (response.success) {
-                resultDiv.innerHTML = '<div class="alert alert-success">Ticket validated successfully!</div>';
-                document.getElementById('validate-ticket-form').reset();
-                await this.loadTickets();
-            }
+            // If we get here, validation succeeded (no exception thrown)
+            resultDiv.innerHTML = '<div class="alert alert-success">Ticket validated successfully!</div>';
+            document.getElementById('validate-ticket-form').reset();
+            await this.loadTickets();
         } catch (error) {
             resultDiv.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
         }
@@ -124,11 +123,10 @@ export class TicketManager {
 
     async loadTickets() {
         try {
-            const response = await this.api.getAllTickets();
-            if (response.success && response.data) {
-                this.tickets = response.data;
-                this.renderTicketList();
-            }
+            const tickets = await this.api.getAllTickets();
+            // API client now unwraps the response automatically
+            this.tickets = tickets || [];
+            this.renderTicketList();
         } catch (error) {
             console.error('Failed to load tickets:', error);
             document.getElementById('ticket-list').innerHTML = `
