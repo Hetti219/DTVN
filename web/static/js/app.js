@@ -78,6 +78,8 @@ class App {
                     if (!this.modules.nodes) {
                         const { NodeManager } = await import('./nodes.js');
                         this.modules.nodes = new NodeManager(this.api, this.ws);
+                        // Make nodeManager globally accessible for onclick handlers
+                        window.nodeManager = this.modules.nodes;
                     }
                     await this.modules.nodes.render(contentArea);
                     break;
