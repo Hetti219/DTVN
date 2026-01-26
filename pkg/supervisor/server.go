@@ -140,6 +140,22 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/simulator/output", s.handleGetSimulatorOutput).Methods("GET")
 	api.HandleFunc("/simulator/results", s.handleGetSimulatorResults).Methods("GET")
 
+	// Ticket proxy endpoints (forward to running validator nodes)
+	api.HandleFunc("/tickets", s.handleProxyGetAllTickets).Methods("GET")
+	api.HandleFunc("/tickets/validate", s.handleProxyValidateTicket).Methods("POST")
+	api.HandleFunc("/tickets/consume", s.handleProxyConsumeTicket).Methods("POST")
+	api.HandleFunc("/tickets/dispute", s.handleProxyDisputeTicket).Methods("POST")
+	api.HandleFunc("/tickets/{id}", s.handleProxyGetTicket).Methods("GET")
+
+	// Stats proxy endpoint
+	api.HandleFunc("/stats", s.handleProxyGetStats).Methods("GET")
+
+	// Peers proxy endpoint
+	api.HandleFunc("/peers", s.handleProxyGetPeers).Methods("GET")
+
+	// Config proxy endpoint
+	api.HandleFunc("/config", s.handleProxyGetConfig).Methods("GET")
+
 	// Supervisor status
 	api.HandleFunc("/status", s.handleGetStatus).Methods("GET")
 

@@ -15,6 +15,9 @@ export class NodeManager {
         // Check if we're in supervisor mode
         await this.checkSupervisorMode();
 
+        const supervisorControlsDisabled = !this.isSupervisorMode ? 'disabled' : '';
+        const supervisorControlsTitle = !this.isSupervisorMode ? 'title="Run supervisor binary for node control"' : '';
+
         container.innerHTML = `
             <div class="page-header">
                 <h2 class="page-title">Node Management</h2>
@@ -30,10 +33,10 @@ export class NodeManager {
                 <div class="card-header">
                     <h3 class="card-title">Cluster Control</h3>
                     <div class="btn-group">
-                        <button class="btn btn-success" id="start-cluster-btn">
+                        <button class="btn btn-success" id="start-cluster-btn" ${supervisorControlsDisabled} ${supervisorControlsTitle}>
                             Start Cluster
                         </button>
-                        <button class="btn btn-danger" id="stop-cluster-btn">
+                        <button class="btn btn-danger" id="stop-cluster-btn" ${supervisorControlsDisabled} ${supervisorControlsTitle}>
                             Stop All
                         </button>
                     </div>
@@ -43,7 +46,7 @@ export class NodeManager {
                         <div class="form-group">
                             <label for="cluster-size">Cluster Size</label>
                             <input type="number" id="cluster-size" class="form-control"
-                                   value="4" min="1" max="30" style="width: 100px;">
+                                   value="4" min="1" max="30" style="width: 100px;" ${supervisorControlsDisabled}>
                         </div>
                     </div>
                 </div>
@@ -52,7 +55,7 @@ export class NodeManager {
             <div class="card">
                 <div class="card-header">
                     <h3 class="card-title">Running Nodes</h3>
-                    <button class="btn btn-primary" id="add-node-btn">
+                    <button class="btn btn-primary" id="add-node-btn" ${supervisorControlsDisabled} ${supervisorControlsTitle}>
                         + Add Node
                     </button>
                 </div>
@@ -112,6 +115,7 @@ export class NodeManager {
 
         this.setupEventListeners();
         this.setupWSHandlers();
+        this.updateSupervisorModeAlert();
         await this.loadNodes();
     }
 
@@ -162,10 +166,12 @@ export class NodeManager {
             // Not in supervisor mode
             this.isSupervisorMode = false;
         }
+    }
 
+    updateSupervisorModeAlert() {
         const alert = document.getElementById('supervisor-mode-alert');
-        if (alert && !this.isSupervisorMode) {
-            alert.style.display = 'block';
+        if (alert) {
+            alert.style.display = this.isSupervisorMode ? 'none' : 'block';
         }
     }
 
@@ -207,7 +213,7 @@ export class NodeManager {
         if (this.nodes.length === 0) {
             nodeList.innerHTML = `
                 <div class="empty-state">
-                    <p>No nodes running. Start a cluster or add individual nodes.</p>
+                    <p>No nodes running. ${this.isSupervisorMode ? 'Start a cluster or add individual nodes.' : 'Run the supervisor binary for node management.'}</p>
                 </div>
             `;
             return;
@@ -239,23 +245,29 @@ export class NodeManager {
                         </div>
                     ` : ''}
                 </div>
-                <div class="node-actions">
-                    <button class="btn btn-sm btn-secondary" onclick="window.nodeManager.viewLogs('${node.id}')">
-                        Logs
-                    </button>
-                    ${node.status === 'running' ? `
-                        <button class="btn btn-sm btn-warning" onclick="window.nodeManager.restartNode('${node.id}')">
-                            Restart
+                ${this.isSupervisorMode ? `
+                    <div class="node-actions">
+                        <button class="btn btn-sm btn-secondary" onclick="window.nodeManager.viewLogs('${node.id}')">
+                            Logs
                         </button>
-                        <button class="btn btn-sm btn-danger" onclick="window.nodeManager.stopNode('${node.id}')">
-                            Stop
-                        </button>
-                    ` : node.status === 'stopped' || node.status === 'error' ? `
-                        <button class="btn btn-sm btn-success" onclick="window.nodeManager.startExistingNode('${node.id}')">
-                            Start
-                        </button>
-                    ` : ''}
-                </div>
+                        ${node.status === 'running' ? `
+                            <button class="btn btn-sm btn-warning" onclick="window.nodeManager.restartNode('${node.id}')">
+                                Restart
+                            </button>
+                            <button class="btn btn-sm btn-danger" onclick="window.nodeManager.stopNode('${node.id}')">
+                                Stop
+                            </button>
+                        ` : node.status === 'stopped' || node.status === 'error' ? `
+                            <button class="btn btn-sm btn-success" onclick="window.nodeManager.startExistingNode('${node.id}')">
+                                Start
+                            </button>
+                        ` : ''}
+                    </div>
+                ` : `
+                    <div class="node-actions">
+                        <p class="text-muted" style="font-size: 0.85em; margin: 0;">View only - use supervisor for control</p>
+                    </div>
+                `}
             </div>
         `).join('');
     }
