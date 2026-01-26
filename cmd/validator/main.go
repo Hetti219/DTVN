@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"embed"
 	"flag"
 	"fmt"
 	"os"
@@ -22,9 +21,6 @@ import (
 	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/proto"
 )
-
-//go:embed ../../web/static
-var staticFiles embed.FS
 
 // ValidatorNode represents a complete validator node
 type ValidatorNode struct {
@@ -243,9 +239,6 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 		ctx:          ctx,
 		cancel:       cancel,
 	}
-
-	// Set static files for web UI
-	api.SetStaticFS(staticFiles)
 
 	// Initialize API server
 	apiServer, err := api.NewServer(ctx, &api.Config{
