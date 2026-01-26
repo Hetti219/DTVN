@@ -403,6 +403,21 @@ func (p *P2PHost) GetPeers() []peer.ID {
 	return peers
 }
 
+// GetConnectedPeers returns detailed information about connected peers
+func (p *P2PHost) GetConnectedPeers() []peer.AddrInfo {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	peerInfos := make([]peer.AddrInfo, 0, len(p.peers))
+	for peerID, peerConn := range p.peers {
+		peerInfos = append(peerInfos, peer.AddrInfo{
+			ID:    peerID,
+			Addrs: peerConn.Addrs,
+		})
+	}
+	return peerInfos
+}
+
 // GetPeerCount returns the number of connected peers
 func (p *P2PHost) GetPeerCount() int {
 	p.mu.RLock()
