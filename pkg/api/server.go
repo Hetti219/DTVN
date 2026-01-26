@@ -33,6 +33,8 @@ type ValidatorInterface interface {
 	GetTicket(ticketID string) (interface{}, error)
 	GetAllTickets() ([]interface{}, error)
 	GetStats() map[string]interface{}
+	GetPeers() ([]PeerInfo, error)
+	GetConfig() (interface{}, error)
 }
 
 // Config holds API server configuration
@@ -114,11 +116,18 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/status", s.handleGetStatus).Methods("GET")
 	api.HandleFunc("/stats", s.handleGetStats).Methods("GET")
 
+	// Peer and config information
+	api.HandleFunc("/peers", s.handleGetPeers).Methods("GET")
+	api.HandleFunc("/config", s.handleGetConfig).Methods("GET")
+
 	// Health check
 	s.router.HandleFunc("/health", s.handleHealthCheck).Methods("GET")
 
 	// WebSocket
 	s.router.HandleFunc("/ws", s.handleWebSocket)
+
+	// Static files (must be last so API routes take precedence)
+	s.setupStaticRoutes()
 
 	// Middleware
 	s.router.Use(s.loggingMiddleware)
