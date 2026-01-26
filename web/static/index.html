@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DTVN - Distributed Ticket Validation Network</title>
+    <link rel="stylesheet" href="/css/main.css">
+    <link rel="stylesheet" href="/css/dashboard.css">
+    <link rel="stylesheet" href="/css/components.css">
+
+    <!-- External libraries from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1 class="logo">DTVN</h1>
+                <span class="subtitle">Distributed Ticket Validation Network</span>
+            </div>
+            <div class="header-right">
+                <div class="node-info">
+                    <span class="node-label">Node:</span>
+                    <span id="node-id" class="node-id">Loading...</span>
+                </div>
+                <div class="status-badge">
+                    <span id="connection-status" class="status-indicator offline">●</span>
+                    <span id="connection-text">Disconnected</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Container -->
+        <div class="main-container">
+            <!-- Sidebar Navigation -->
+            <nav class="sidebar">
+                <ul class="nav-menu">
+                    <li class="nav-item active" data-section="dashboard">
+                        <span class="nav-icon">📊</span>
+                        <span class="nav-label">Dashboard</span>
+                    </li>
+                    <li class="nav-item" data-section="nodes">
+                        <span class="nav-icon">🖥️</span>
+                        <span class="nav-label">Nodes</span>
+                    </li>
+                    <li class="nav-item" data-section="network">
+                        <span class="nav-icon">🔗</span>
+                        <span class="nav-label">Network</span>
+                    </li>
+                    <li class="nav-item" data-section="tickets">
+                        <span class="nav-icon">🎫</span>
+                        <span class="nav-label">Tickets</span>
+                    </li>
+                    <li class="nav-item" data-section="simulator">
+                        <span class="nav-icon">🧪</span>
+                        <span class="nav-label">Simulator</span>
+                    </li>
+                    <li class="nav-item" data-section="metrics">
+                        <span class="nav-icon">📈</span>
+                        <span class="nav-label">Metrics</span>
+                    </li>
+                </ul>
+            </nav>
+
+            <!-- Main Content Area -->
+            <main class="content">
+                <div id="content-area">
+                    <!-- Dynamic content loaded by JavaScript -->
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Loading dashboard...</p>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Toast notifications container -->
+    <div id="toast-container"></div>
+
+    <!-- Load application scripts (ES6 modules) -->
+    <script type="module" src="/js/app.js"></script>
+</body>
+</html>
