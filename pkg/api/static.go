@@ -13,7 +13,8 @@ var StaticFS embed.FS
 // setupStaticRoutes configures static file serving for the web UI
 func (s *Server) setupStaticRoutes() {
 	// Check if static FS is available (it may not be set for validator-only mode)
-	staticFS, err := fs.Sub(StaticFS, ".")
+	// Extract the web/static subdirectory from the embedded filesystem
+	staticFS, err := fs.Sub(StaticFS, "web/static")
 	if err != nil {
 		// No static files available, skip serving
 		return
