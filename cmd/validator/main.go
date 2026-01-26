@@ -822,3 +822,33 @@ func (n *ValidatorNode) GetStats() map[string]interface{} {
 		"storage_stats": n.storage.GetStats(),
 	}
 }
+
+func (n *ValidatorNode) GetPeers() ([]api.PeerInfo, error) {
+	// Get connected peers from P2P host
+	peers := n.p2pHost.GetConnectedPeers()
+
+	// Convert to API format
+	peerInfos := make([]api.PeerInfo, 0, len(peers))
+	for _, p := range peers {
+		addrs := make([]string, len(p.Addrs))
+		for i, addr := range p.Addrs {
+			addrs[i] = addr.String()
+		}
+
+		peerInfos = append(peerInfos, api.PeerInfo{
+			ID:    p.ID.String(),
+			Addrs: addrs,
+		})
+	}
+
+	return peerInfos, nil
+}
+
+func (n *ValidatorNode) GetConfig() (interface{}, error) {
+	return map[string]interface{}{
+		"node_id":      n.nodeID,
+		"total_nodes":  n.totalNodes,
+		"is_primary":   n.pbftNode.IsPrimary(),
+		"current_view": n.pbftNode.GetView(),
+	}, nil
+}
