@@ -289,9 +289,7 @@ func TestHandlerRegistration(t *testing.T) {
 		require.NoError(t, err)
 		defer host.Close()
 
-		called := false
 		handler := func(peerID peer.ID, data []byte) error {
-			called = true
 			return nil
 		}
 
