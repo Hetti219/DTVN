@@ -187,8 +187,7 @@ func TestRouteMessage(t *testing.T) {
 		})
 
 		stateUpdate := &pb.StateUpdate{
-			NodeId:    "test-node",
-			Timestamp: 12345,
+			NodeId: "test-node",
 		}
 		payload, _ := proto.Marshal(stateUpdate)
 
@@ -202,7 +201,6 @@ func TestRouteMessage(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, receivedUpdate)
 		assert.Equal(t, "test-node", receivedUpdate.NodeId)
-		assert.Equal(t, int64(12345), receivedUpdate.Timestamp)
 	})
 
 	t.Run("RouteClientRequest", func(t *testing.T) {
