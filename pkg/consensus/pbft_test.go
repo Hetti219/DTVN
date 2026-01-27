@@ -628,9 +628,7 @@ func TestHandlerRegistration(t *testing.T) {
 		require.NoError(t, err)
 		defer node.Close()
 
-		called := false
 		handler := func(req *Request) error {
-			called = true
 			return nil
 		}
 
