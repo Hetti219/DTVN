@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 
 // MockValidator implements ValidatorInterface for testing
 type MockValidator struct {
+	mu            sync.RWMutex
 	tickets       map[string]interface{}
 	validateError error
 	consumeError  error
@@ -41,6 +43,8 @@ func (m *MockValidator) ValidateTicket(ticketID string, data []byte) error {
 	if m.validateError != nil {
 		return m.validateError
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.tickets[ticketID] = map[string]interface{}{
 		"id":    ticketID,
 		"state": "VALIDATED",
@@ -53,6 +57,8 @@ func (m *MockValidator) ConsumeTicket(ticketID string) error {
 	if m.consumeError != nil {
 		return m.consumeError
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if ticket, ok := m.tickets[ticketID]; ok {
 		ticketMap := ticket.(map[string]interface{})
 		ticketMap["state"] = "CONSUMED"
@@ -65,6 +71,8 @@ func (m *MockValidator) DisputeTicket(ticketID string) error {
 	if m.disputeError != nil {
 		return m.disputeError
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if ticket, ok := m.tickets[ticketID]; ok {
 		ticketMap := ticket.(map[string]interface{})
 		ticketMap["state"] = "DISPUTED"
@@ -77,6 +85,8 @@ func (m *MockValidator) GetTicket(ticketID string) (interface{}, error) {
 	if m.getTicketErr != nil {
 		return nil, m.getTicketErr
 	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	ticket, ok := m.tickets[ticketID]
 	if !ok {
 		return nil, errors.New("ticket not found")
@@ -85,6 +95,8 @@ func (m *MockValidator) GetTicket(ticketID string) (interface{}, error) {
 }
 
 func (m *MockValidator) GetAllTickets() ([]interface{}, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	tickets := make([]interface{}, 0, len(m.tickets))
 	for _, ticket := range m.tickets {
 		tickets = append(tickets, ticket)
