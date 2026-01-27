@@ -3,7 +3,7 @@ package consensus
 import (
 	"fmt"
 
-	pb "github.com/Hetti219/distributed-ticket-validation/proto"
+	pb "github.com/Hetti219/DTVN/proto"
 	"google.golang.org/protobuf/proto"
 )
 

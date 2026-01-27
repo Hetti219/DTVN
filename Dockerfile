@@ -2,7 +2,7 @@
 FROM golang:1.25.5-alpine3.21 AS builder
 
 # Add metadata labels
-LABEL org.opencontainers.image.source="https://github.com/Hetti219/distributed-ticket-validation"
+LABEL org.opencontainers.image.source="https://github.com/Hetti219/DTVN"
 LABEL org.opencontainers.image.description="Distributed Ticket Validation Network - Validator Node"
 LABEL org.opencontainers.image.licenses="MIT"
 
@@ -46,7 +46,7 @@ RUN CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
 FROM alpine:3.23
 
 # Add metadata labels
-LABEL org.opencontainers.image.source="https://github.com/Hetti219/distributed-ticket-validation"
+LABEL org.opencontainers.image.source="https://github.com/Hetti219/DTVN"
 LABEL org.opencontainers.image.description="Distributed Ticket Validation Network - Validator Node"
 LABEL org.opencontainers.image.licenses="MIT"
 

@@ -10,13 +10,13 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Hetti219/distributed-ticket-validation/pkg/api"
-	"github.com/Hetti219/distributed-ticket-validation/pkg/consensus"
-	"github.com/Hetti219/distributed-ticket-validation/pkg/gossip"
-	"github.com/Hetti219/distributed-ticket-validation/pkg/network"
-	"github.com/Hetti219/distributed-ticket-validation/pkg/state"
-	"github.com/Hetti219/distributed-ticket-validation/pkg/storage"
-	pb "github.com/Hetti219/distributed-ticket-validation/proto"
+	"github.com/Hetti219/DTVN/pkg/api"
+	"github.com/Hetti219/DTVN/pkg/consensus"
+	"github.com/Hetti219/DTVN/pkg/gossip"
+	"github.com/Hetti219/DTVN/pkg/network"
+	"github.com/Hetti219/DTVN/pkg/state"
+	"github.com/Hetti219/DTVN/pkg/storage"
+	pb "github.com/Hetti219/DTVN/proto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	"google.golang.org/protobuf/proto"
@@ -627,12 +627,12 @@ func (n *ValidatorNode) handleStateSyncRequest(payload []byte) error {
 
 	// Create response
 	response := &pb.StateSyncResponse{
-		ResponderId:       n.nodeID,
-		CurrentSequence:   currentSeq,
-		CurrentView:       currentView,
-		ValidatedTickets:  pbTickets,
-		ConsensusLog:      consensusLog,
-		Timestamp:         time.Now().Unix(),
+		ResponderId:      n.nodeID,
+		CurrentSequence:  currentSeq,
+		CurrentView:      currentView,
+		ValidatedTickets: pbTickets,
+		ConsensusLog:     consensusLog,
+		Timestamp:        time.Now().Unix(),
 	}
 
 	// Serialize response

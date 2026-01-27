@@ -10,7 +10,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Hetti219/distributed-ticket-validation/pkg/supervisor"
+	"github.com/Hetti219/DTVN/pkg/supervisor"
 )
 
 func main() {
