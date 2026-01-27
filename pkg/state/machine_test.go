@@ -2,6 +2,7 @@ package state
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -569,9 +570,9 @@ func TestPublisher(t *testing.T) {
 	t.Run("RegisterPublisher", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		published := false
+		var published atomic.Bool
 		sm.RegisterPublisher(func(ticketID string, state TicketState, validatorID string, timestamp int64) error {
-			published = true
+			published.Store(true)
 			return nil
 		})
 
@@ -580,7 +581,7 @@ func TestPublisher(t *testing.T) {
 		// Give goroutine time to execute
 		time.Sleep(50 * time.Millisecond)
 
-		assert.True(t, published)
+		assert.True(t, published.Load())
 	})
 }
 
