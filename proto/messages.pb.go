@@ -7,12 +7,11 @@
 package proto
 
 import (
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
-
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -1600,7 +1599,7 @@ const file_proto_messages_proto_rawDesc = "" +
 	"\aPENDING\x10\x01\x12\r\n" +
 	"\tVALIDATED\x10\x02\x12\f\n" +
 	"\bCONSUMED\x10\x03\x12\f\n" +
-	"\bDISPUTED\x10\x04B9Z7github.com/Hetti219/DTVN/protob\x06proto3"
+	"\bDISPUTED\x10\x04B Z\x1egithub.com/Hetti219/DTVN/protob\x06proto3"
 
 var (
 	file_proto_messages_proto_rawDescOnce sync.Once
