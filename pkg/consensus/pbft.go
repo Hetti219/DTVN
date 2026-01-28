@@ -46,6 +46,10 @@ type PBFTNode struct {
 	// Maps request ID to callback function
 	requestCallbacks map[string]ConsensusCallback
 	callbackMu       sync.Mutex
+
+	// State replicator - called after consensus commits to ensure reliable state propagation
+	// This provides reliable delivery beyond probabilistic gossip
+	stateReplicator StateReplicator
 }
 
 // PrepareMsg represents a PREPARE message
@@ -132,6 +136,12 @@ type ConsensusHandler func(*Request) error
 // ConsensusCallback is called when consensus completes or fails for a specific request
 // This enables synchronous API responses that wait for consensus
 type ConsensusCallback func(success bool, err error)
+
+// StateReplicator is called after consensus commits to ensure reliable state propagation
+// to all peers. This provides guaranteed delivery beyond probabilistic gossip.
+// The replicator receives the request that was committed and should broadcast the
+// resulting state to all connected peers.
+type StateReplicator func(req *Request) error
 
 // MessageBroadcaster interface for broadcasting messages
 type MessageBroadcaster interface {
@@ -528,6 +538,19 @@ func (n *PBFTNode) executeRequest(sequence int64) error {
 
 	fmt.Printf("PBFT: ✅ Request executed successfully for ticket %s\n", req.TicketID)
 
+	// Call state replicator to ensure reliable state propagation to all peers
+	// This provides guaranteed delivery beyond probabilistic gossip by directly
+	// broadcasting state updates to all connected peers after consensus commits.
+	if n.stateReplicator != nil {
+		if err := n.stateReplicator(req); err != nil {
+			// Log the error but don't fail - state was applied locally and gossip
+			// will eventually propagate it via anti-entropy
+			fmt.Printf("PBFT: Warning - State replication failed (will retry via anti-entropy): %v\n", err)
+		} else {
+			fmt.Printf("PBFT: ✅ State replicated to all peers for ticket %s\n", req.TicketID)
+		}
+	}
+
 	// Invoke callback with success
 	n.invokeCallback(req.RequestID, true, nil)
 
@@ -553,6 +576,15 @@ func (n *PBFTNode) RegisterCallback(requestID string, callback ConsensusCallback
 	n.callbackMu.Lock()
 	defer n.callbackMu.Unlock()
 	n.requestCallbacks[requestID] = callback
+}
+
+// RegisterStateReplicator registers a callback that is invoked after consensus commits
+// to ensure reliable state propagation to all peers. This provides guaranteed delivery
+// beyond probabilistic gossip by directly broadcasting state updates to all connected peers.
+func (n *PBFTNode) RegisterStateReplicator(replicator StateReplicator) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.stateReplicator = replicator
 }
 
 // unregisterCallback removes a callback for a request

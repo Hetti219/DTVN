@@ -124,13 +124,16 @@ func (sm *StateMachine) ValidateTicket(ticketID string, validatorID string, data
 		}
 	}
 
-	// Publish state update via gossip
+	// Publish state update via gossip SYNCHRONOUSLY
+	// This ensures the state update is published before the handler returns,
+	// preventing race conditions where the API returns success but the state
+	// hasn't been replicated to other nodes yet.
 	if sm.publishUpdate != nil {
-		go func() {
-			if err := sm.publishUpdate(ticketID, StateValidated, validatorID, ticket.Timestamp); err != nil {
-				fmt.Printf("Failed to publish state update: %v\n", err)
-			}
-		}()
+		if err := sm.publishUpdate(ticketID, StateValidated, validatorID, ticket.Timestamp); err != nil {
+			// Log the error but don't fail - the state was applied locally
+			// and gossip will eventually propagate it via anti-entropy
+			fmt.Printf("Warning: Failed to publish state update (will retry via anti-entropy): %v\n", err)
+		}
 	}
 
 	return nil

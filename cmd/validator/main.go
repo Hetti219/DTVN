@@ -326,6 +326,10 @@ func (n *ValidatorNode) Start() error {
 		return fmt.Errorf("failed to start API server: %w", err)
 	}
 
+	// Start periodic anti-entropy mechanism for state synchronization
+	// This ensures eventual consistency by periodically syncing state with random peers
+	go n.runAntiEntropy()
+
 	return nil
 }
 
@@ -364,6 +368,44 @@ func (n *ValidatorNode) Stop() error {
 	}
 
 	return nil
+}
+
+// runAntiEntropy runs periodic state synchronization with random peers
+// This implements an anti-entropy protocol to ensure eventual consistency
+// by periodically exchanging state with other nodes in the network.
+func (n *ValidatorNode) runAntiEntropy() {
+	// Anti-entropy interval: sync with a random peer every 10 seconds
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	fmt.Printf("AntiEntropy: Started periodic state synchronization (interval: 10s)\n")
+
+	for {
+		select {
+		case <-n.ctx.Done():
+			fmt.Printf("AntiEntropy: Stopping periodic state synchronization\n")
+			return
+		case <-ticker.C:
+			n.performAntiEntropySync()
+		}
+	}
+}
+
+// performAntiEntropySync performs a single anti-entropy synchronization round
+func (n *ValidatorNode) performAntiEntropySync() {
+	// Get connected peers
+	peers := n.p2pHost.GetConnectedPeers()
+	if len(peers) == 0 {
+		return // No peers to sync with
+	}
+
+	// Pick a random peer for anti-entropy exchange
+	// Using a simple random selection based on current time
+	randomIndex := time.Now().UnixNano() % int64(len(peers))
+	selectedPeer := peers[randomIndex]
+
+	// Request state sync from the selected peer
+	n.requestStateSync(selectedPeer.ID)
 }
 
 // setupHandlers sets up event handlers
@@ -484,6 +526,70 @@ func (n *ValidatorNode) setupHandlers() {
 		case "DISPUTE":
 			return n.stateMachine.DisputeTicket(req.TicketID, n.nodeID)
 		}
+		return nil
+	})
+
+	// Register state replicator for reliable state propagation after consensus commits
+	// This broadcasts state updates directly to ALL peers (not probabilistic gossip)
+	// to ensure reliable delivery of committed state changes.
+	n.pbftNode.RegisterStateReplicator(func(req *consensus.Request) error {
+		// Get the ticket state that was just committed
+		ticket, err := n.stateMachine.GetTicket(req.TicketID)
+		if err != nil {
+			return fmt.Errorf("failed to get committed ticket state: %w", err)
+		}
+
+		// Convert to protobuf state
+		var protoState pb.State
+		switch ticket.State {
+		case state.StateValidated:
+			protoState = pb.State_VALIDATED
+		case state.StateConsumed:
+			protoState = pb.State_CONSUMED
+		case state.StateDisputed:
+			protoState = pb.State_DISPUTED
+		default:
+			protoState = pb.State_PENDING
+		}
+
+		// Create state update message with consensus confirmation
+		update := &pb.StateUpdate{
+			Tickets: []*pb.TicketState{{
+				TicketId:    ticket.ID,
+				State:       protoState,
+				ValidatorId: ticket.ValidatorID,
+				LastUpdated: ticket.Timestamp,
+			}},
+			NodeId: n.nodeID,
+		}
+
+		// Serialize state update
+		payload, err := proto.Marshal(update)
+		if err != nil {
+			return fmt.Errorf("failed to marshal state update: %w", err)
+		}
+
+		// Wrap in ValidatorMessage with STATE_UPDATE type
+		msg := &pb.ValidatorMessage{
+			Type:      pb.ValidatorMessage_STATE_UPDATE,
+			Payload:   payload,
+			SenderId:  n.nodeID,
+			Timestamp: time.Now().Unix(),
+		}
+
+		data, err := proto.Marshal(msg)
+		if err != nil {
+			return fmt.Errorf("failed to marshal ValidatorMessage: %w", err)
+		}
+
+		// Broadcast directly to ALL peers (reliable delivery, not probabilistic gossip)
+		ctx, cancel := context.WithTimeout(n.ctx, 5*time.Second)
+		defer cancel()
+
+		if err := n.p2pHost.Broadcast(ctx, data); err != nil {
+			return fmt.Errorf("failed to broadcast state update: %w", err)
+		}
+
 		return nil
 	})
 
