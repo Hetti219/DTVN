@@ -41,6 +41,11 @@ type PBFTNode struct {
 	handlers     []ConsensusHandler
 	broadcaster  MessageBroadcaster
 	checkpoints  map[int64]*Checkpoint
+
+	// Callback mechanism for synchronous consensus waiting
+	// Maps request ID to callback function
+	requestCallbacks map[string]ConsensusCallback
+	callbackMu       sync.Mutex
 }
 
 // PrepareMsg represents a PREPARE message
@@ -124,6 +129,10 @@ type ConsensusMessage interface {
 // ConsensusHandler is called when consensus is reached
 type ConsensusHandler func(*Request) error
 
+// ConsensusCallback is called when consensus completes or fails for a specific request
+// This enables synchronous API responses that wait for consensus
+type ConsensusCallback func(success bool, err error)
+
 // MessageBroadcaster interface for broadcasting messages
 type MessageBroadcaster interface {
 	Broadcast(ctx context.Context, data []byte) error
@@ -155,24 +164,25 @@ func NewPBFTNode(ctx context.Context, cfg *Config, broadcaster MessageBroadcaste
 	}
 
 	node := &PBFTNode{
-		nodeID:       cfg.NodeID,
-		view:         0,
-		sequence:     0,
-		state:        StateIdle,
-		f:            f,
-		totalNodes:   cfg.TotalNodes,
-		isPrimary:    cfg.IsPrimary,
-		prepareLog:   make(map[int64]map[string]*PrepareMsg),
-		commitLog:    make(map[int64]map[string]*CommitMsg),
-		requestLog:   make(map[int64]*Request),
-		messageQueue: make(chan ConsensusMessage, 1000),
-		viewTimer:    time.NewTimer(viewTimeout),
-		viewTimeout:  viewTimeout, // Store for consistent timer resets
-		ctx:          nodeCtx,
-		cancel:       cancel,
-		handlers:     make([]ConsensusHandler, 0),
-		broadcaster:  broadcaster,
-		checkpoints:  make(map[int64]*Checkpoint),
+		nodeID:           cfg.NodeID,
+		view:             0,
+		sequence:         0,
+		state:            StateIdle,
+		f:                f,
+		totalNodes:       cfg.TotalNodes,
+		isPrimary:        cfg.IsPrimary,
+		prepareLog:       make(map[int64]map[string]*PrepareMsg),
+		commitLog:        make(map[int64]map[string]*CommitMsg),
+		requestLog:       make(map[int64]*Request),
+		messageQueue:     make(chan ConsensusMessage, 1000),
+		viewTimer:        time.NewTimer(viewTimeout),
+		viewTimeout:      viewTimeout, // Store for consistent timer resets
+		ctx:              nodeCtx,
+		cancel:           cancel,
+		handlers:         make([]ConsensusHandler, 0),
+		broadcaster:      broadcaster,
+		checkpoints:      make(map[int64]*Checkpoint),
+		requestCallbacks: make(map[string]ConsensusCallback),
 	}
 
 	return node, nil
@@ -492,7 +502,8 @@ func (n *PBFTNode) moveToCommitPhase(sequence int64, digest string) error {
 func (n *PBFTNode) executeRequest(sequence int64) error {
 	req, exists := n.requestLog[sequence]
 	if !exists {
-		return fmt.Errorf("request not found for sequence %d", sequence)
+		err := fmt.Errorf("request not found for sequence %d", sequence)
+		return err
 	}
 
 	fmt.Printf("PBFT: ✅ Consensus reached for seq %d, executing request for ticket %s\n", sequence, req.TicketID)
@@ -500,14 +511,25 @@ func (n *PBFTNode) executeRequest(sequence int64) error {
 	n.state = StateCommitted
 
 	// Call registered handlers
+	var handlerErr error
 	for _, handler := range n.handlers {
 		if err := handler(req); err != nil {
 			fmt.Printf("PBFT: Handler error: %v\n", err)
-			return err
+			handlerErr = err
+			break
 		}
 	}
 
+	// Invoke callback for this request (notifies waiting API call)
+	if handlerErr != nil {
+		n.invokeCallback(req.RequestID, false, handlerErr)
+		return handlerErr
+	}
+
 	fmt.Printf("PBFT: ✅ Request executed successfully for ticket %s\n", req.TicketID)
+
+	// Invoke callback with success
+	n.invokeCallback(req.RequestID, true, nil)
 
 	// Reset to idle
 	n.state = StateIdle
@@ -523,6 +545,54 @@ func (n *PBFTNode) RegisterHandler(handler ConsensusHandler) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.handlers = append(n.handlers, handler)
+}
+
+// RegisterCallback registers a callback for a specific request that will be called
+// when consensus completes (success or failure). This enables synchronous API responses.
+func (n *PBFTNode) RegisterCallback(requestID string, callback ConsensusCallback) {
+	n.callbackMu.Lock()
+	defer n.callbackMu.Unlock()
+	n.requestCallbacks[requestID] = callback
+}
+
+// unregisterCallback removes a callback for a request
+func (n *PBFTNode) unregisterCallback(requestID string) {
+	n.callbackMu.Lock()
+	defer n.callbackMu.Unlock()
+	delete(n.requestCallbacks, requestID)
+}
+
+// invokeCallback calls and removes the callback for a request
+func (n *PBFTNode) invokeCallback(requestID string, success bool, err error) {
+	n.callbackMu.Lock()
+	callback, exists := n.requestCallbacks[requestID]
+	if exists {
+		delete(n.requestCallbacks, requestID)
+	}
+	n.callbackMu.Unlock()
+
+	if exists && callback != nil {
+		// Call the callback asynchronously to avoid blocking consensus
+		go callback(success, err)
+	}
+}
+
+// failPendingCallbacks fails all pending callbacks (e.g., on view change)
+func (n *PBFTNode) failPendingCallbacks(reason string) {
+	n.callbackMu.Lock()
+	callbacks := make(map[string]ConsensusCallback)
+	for k, v := range n.requestCallbacks {
+		callbacks[k] = v
+	}
+	n.requestCallbacks = make(map[string]ConsensusCallback)
+	n.callbackMu.Unlock()
+
+	// Invoke all callbacks with failure
+	for requestID, callback := range callbacks {
+		if callback != nil {
+			go callback(false, fmt.Errorf("consensus failed: %s (request: %s)", reason, requestID))
+		}
+	}
 }
 
 // processMessages processes incoming consensus messages
@@ -573,12 +643,12 @@ func (n *PBFTNode) monitorViewTimeout() {
 // initiateViewChange initiates a view change
 func (n *PBFTNode) initiateViewChange() {
 	n.mu.Lock()
-	defer n.mu.Unlock()
 
 	// Only trigger view change if there's a pending consensus operation
 	// If the node is idle, just reset the timer and continue
 	if n.state == StateIdle {
 		n.viewTimer.Reset(n.viewTimeout)
+		n.mu.Unlock()
 		return
 	}
 
@@ -600,6 +670,11 @@ func (n *PBFTNode) initiateViewChange() {
 	// Reset state
 	n.state = StateIdle
 	n.viewTimer.Reset(n.viewTimeout)
+
+	n.mu.Unlock()
+
+	// Fail all pending callbacks - consensus did not complete
+	n.failPendingCallbacks("view timeout")
 }
 
 // GetView returns the current view

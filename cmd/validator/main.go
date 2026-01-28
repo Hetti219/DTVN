@@ -732,16 +732,17 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 		}
 	}
 
-	// Create consensus request
+	// Create consensus request with unique ID for callback tracking
+	requestID := fmt.Sprintf("%s-%d-%s", n.nodeID, time.Now().UnixNano(), ticketID)
 	req := &consensus.Request{
-		RequestID: fmt.Sprintf("%s-%d", n.nodeID, time.Now().Unix()),
+		RequestID: requestID,
 		TicketID:  ticketID,
 		Operation: "VALIDATE",
 		Data:      data,
 		Timestamp: time.Now().Unix(),
 	}
 
-	// If this node is the primary, propose directly
+	// If this node is the primary, propose and wait for consensus
 	if n.pbftNode.IsPrimary() {
 		fmt.Printf("Node %s: ✅ Received validation request for ticket %s (I am primary)\n", n.nodeID, ticketID)
 
@@ -756,10 +757,49 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 			fmt.Printf("Node %s: ⚠️  WARNING - only %d/%d peers connected\n", n.nodeID, peerCount, expectedPeers)
 		}
 
-		return n.pbftNode.ProposeRequest(req)
+		// Create result channel for synchronous waiting
+		resultChan := make(chan error, 1)
+
+		// Register callback to be notified when consensus completes
+		n.pbftNode.RegisterCallback(requestID, func(success bool, err error) {
+			if success {
+				resultChan <- nil
+			} else {
+				if err != nil {
+					resultChan <- err
+				} else {
+					resultChan <- fmt.Errorf("consensus failed for ticket %s", ticketID)
+				}
+			}
+		})
+
+		// Propose the request (non-blocking, consensus runs asynchronously)
+		if err := n.pbftNode.ProposeRequest(req); err != nil {
+			// Proposal failed, no need to wait for callback
+			return err
+		}
+
+		// Wait for consensus to complete or timeout
+		// Use a timeout slightly longer than the view timeout to allow for consensus
+		consensusTimeout := 20 * time.Second
+		select {
+		case err := <-resultChan:
+			if err != nil {
+				return fmt.Errorf("consensus failed: %w", err)
+			}
+			fmt.Printf("Node %s: ✅ Consensus completed successfully for ticket %s\n", n.nodeID, ticketID)
+			return nil
+		case <-time.After(consensusTimeout):
+			return fmt.Errorf("consensus timeout: validation for ticket %s did not complete within %v", ticketID, consensusTimeout)
+		case <-n.ctx.Done():
+			return fmt.Errorf("node shutting down")
+		}
 	}
 
 	// Non-primary nodes forward the request to all peers (primary will handle it)
+	// Note: For non-primary nodes, we still return immediately after forwarding
+	// because we don't have visibility into the consensus process
+	// TODO: In a future iteration, implement request tracking for non-primary nodes
 	primary := n.pbftNode.GetPrimary()
 	fmt.Printf("Node %s: 📤 Forwarding validation request for ticket %s to primary %s\n", n.nodeID, ticketID, primary)
 
