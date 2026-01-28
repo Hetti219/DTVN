@@ -342,9 +342,10 @@ func TestMessageHandling(t *testing.T) {
 		ctx := context.Background()
 		broadcaster := NewMockBroadcaster(2)
 
+		// Use TotalNodes=10 so quorum=7; state stays at PREPARE after one message
 		cfg := &Config{
 			NodeID:     "node1",
-			TotalNodes: 3,
+			TotalNodes: 10,
 			IsPrimary:  false,
 		}
 
@@ -394,6 +395,15 @@ func TestMessageHandling(t *testing.T) {
 		require.NoError(t, err)
 		defer node.Close()
 
+		// Seed requestLog so executeRequest succeeds if quorum is reached
+		node.mu.Lock()
+		node.requestLog[1] = &Request{
+			RequestID: "test-request",
+			TicketID:  "test-ticket",
+			Operation: "VALIDATE",
+		}
+		node.mu.Unlock()
+
 		prepare := &PrepareMsg{
 			View:     0,
 			Sequence: 1,
@@ -424,6 +434,15 @@ func TestMessageHandling(t *testing.T) {
 		node, err := NewPBFTNode(ctx, cfg, broadcaster)
 		require.NoError(t, err)
 		defer node.Close()
+
+		// Seed requestLog so executeRequest succeeds if quorum is reached
+		node.mu.Lock()
+		node.requestLog[1] = &Request{
+			RequestID: "test-request",
+			TicketID:  "test-ticket",
+			Operation: "VALIDATE",
+		}
+		node.mu.Unlock()
 
 		commit := &CommitMsg{
 			View:     0,
