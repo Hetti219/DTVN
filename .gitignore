@@ -15,6 +15,7 @@ coverage.html
 
 # Data directories
 data/
+test-data/
 *.db
 
 # IDE
