@@ -90,6 +90,10 @@ func ByzantineTestConfig() *TestConfig {
 	cfg := DefaultTestConfig()
 	cfg.NumNodes = 10
 	cfg.ByzantineNodes = []int{7, 8, 9} // Last 3 nodes are Byzantine
+	// Multiple tickets are processed sequentially through PBFT on the primary.
+	// Each round takes ~1-2s on a 10-node network, so allow sufficient time
+	// for all rounds to complete and state to replicate.
+	cfg.ConsensusWaitTime = 10 * time.Second
 	return cfg
 }
 

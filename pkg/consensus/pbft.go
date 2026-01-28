@@ -310,8 +310,15 @@ func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 		return fmt.Errorf("digest mismatch")
 	}
 
-	// Store request
+	// Store request - this makes the request available for consensus execution.
+	// PREPAREs or COMMITs may have arrived before this PRE-PREPARE due to
+	// network reordering; they are stored but not acted upon until now.
 	n.requestLog[msg.Sequence] = msg.Request
+
+	// Reset view timer for this new consensus round. Without this, a node
+	// that has been idle may have a nearly-expired timer, causing a premature
+	// view change before consensus can complete.
+	n.viewTimer.Reset(n.viewTimeout)
 
 	// Update state
 	n.state = StatePrepare
@@ -353,9 +360,17 @@ func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 		}
 	}()
 
-	// Check if we already have quorum (important for single-node case)
+	// Check if we already have prepare quorum (important for single-node case
+	// and for catching PREPAREs that arrived before this PRE-PREPARE)
 	if n.checkPrepareQuorum(msg.Sequence) {
 		return n.moveToCommitPhase(msg.Sequence, msg.Digest)
+	}
+
+	// Also check if COMMITs arrived early (before PRE-PREPARE) and we already
+	// have commit quorum. This handles extreme reordering where the entire
+	// PREPARE+COMMIT exchange completed before PRE-PREPARE was processed.
+	if n.checkCommitQuorum(msg.Sequence) {
+		return n.executeRequest(msg.Sequence)
 	}
 
 	return nil
@@ -389,7 +404,15 @@ func (n *PBFTNode) HandlePrepare(msg *PrepareMsg) error {
 
 	// Check if we have quorum (2f+1 PREPARE messages)
 	if n.checkPrepareQuorum(msg.Sequence) {
-		return n.moveToCommitPhase(msg.Sequence, msg.Digest)
+		// Only advance to COMMIT phase if PRE-PREPARE has been processed
+		// (request exists in requestLog). If PREPAREs arrive before PRE-PREPARE
+		// due to network reordering, we store them and the quorum check will
+		// be re-triggered when handlePrePrepare runs.
+		if _, hasRequest := n.requestLog[msg.Sequence]; hasRequest {
+			return n.moveToCommitPhase(msg.Sequence, msg.Digest)
+		}
+		fmt.Printf("PBFT: Node %s has PREPARE quorum for seq %d but waiting for PRE-PREPARE (request not yet available)\n",
+			n.nodeID, msg.Sequence)
 	}
 
 	return nil
@@ -423,7 +446,15 @@ func (n *PBFTNode) HandleCommit(msg *CommitMsg) error {
 
 	// Check if we have quorum (2f+1 COMMIT messages)
 	if n.checkCommitQuorum(msg.Sequence) {
-		return n.executeRequest(msg.Sequence)
+		// Only execute if PRE-PREPARE has been processed (request exists).
+		// If COMMITs arrive before PRE-PREPARE due to network reordering,
+		// we store them and executeRequest will be called from
+		// handlePrePrepare → moveToCommitPhase once the request is available.
+		if _, hasRequest := n.requestLog[msg.Sequence]; hasRequest {
+			return n.executeRequest(msg.Sequence)
+		}
+		fmt.Printf("PBFT: Node %s has COMMIT quorum for seq %d but waiting for PRE-PREPARE (request not yet available)\n",
+			n.nodeID, msg.Sequence)
 	}
 
 	return nil

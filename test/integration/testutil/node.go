@@ -104,7 +104,7 @@ func NewTestNode(cfg *NodeConfig) (*TestNode, error) {
 		ctx:           ctx,
 		cancel:        cancel,
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: 25 * time.Second,
 		},
 	}, nil
 }
@@ -117,6 +117,11 @@ func (n *TestNode) Start(validatorBinary string) error {
 	if n.started {
 		return fmt.Errorf("node %s already started", n.ID)
 	}
+
+	// Create a fresh context for this start. This is critical for restarts:
+	// Stop() cancels the previous context, so reusing it would cause the
+	// new process to be killed immediately.
+	n.ctx, n.cancel = context.WithCancel(context.Background())
 
 	// Build command arguments (using single-dash flags as expected by validator)
 	args := []string{

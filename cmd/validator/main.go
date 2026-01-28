@@ -315,6 +315,9 @@ func (n *ValidatorNode) Start() error {
 		fmt.Printf("✅ Single-node mode - no peers expected\n\n")
 	}
 
+	// Load persisted tickets into state machine before starting network components
+	n.loadTicketsFromStore()
+
 	// Start gossip engine
 	n.gossipEngine.Start()
 
@@ -329,6 +332,13 @@ func (n *ValidatorNode) Start() error {
 	// Start periodic anti-entropy mechanism for state synchronization
 	// This ensures eventual consistency by periodically syncing state with random peers
 	go n.runAntiEntropy()
+
+	// Immediately request state sync from a peer on startup to recover
+	// any state missed during downtime (e.g., after partition recovery)
+	go func() {
+		time.Sleep(1 * time.Second) // Brief delay to let connections settle
+		n.performAntiEntropySync()
+	}()
 
 	return nil
 }
@@ -374,11 +384,11 @@ func (n *ValidatorNode) Stop() error {
 // This implements an anti-entropy protocol to ensure eventual consistency
 // by periodically exchanging state with other nodes in the network.
 func (n *ValidatorNode) runAntiEntropy() {
-	// Anti-entropy interval: sync with a random peer every 10 seconds
-	ticker := time.NewTicker(10 * time.Second)
+	// Anti-entropy interval: sync with a random peer every 5 seconds
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	fmt.Printf("AntiEntropy: Started periodic state synchronization (interval: 10s)\n")
+	fmt.Printf("AntiEntropy: Started periodic state synchronization (interval: 5s)\n")
 
 	for {
 		select {
@@ -458,7 +468,14 @@ func (n *ValidatorNode) setupHandlers() {
 		}
 
 		// Merge state from remote node (FIXES unused MergeState)
-		return n.stateMachine.MergeState(tickets)
+		if err := n.stateMachine.MergeState(tickets); err != nil {
+			return err
+		}
+		// Persist merged tickets to BoltDB so state survives restarts
+		for _, t := range tickets {
+			n.persistTicket(t.ID)
+		}
+		return nil
 	})
 
 	// Set router on P2P host
@@ -518,14 +535,20 @@ func (n *ValidatorNode) setupHandlers() {
 	// Register consensus handler
 	n.pbftNode.RegisterHandler(func(req *consensus.Request) error {
 		// Handle consensus decision
+		var err error
 		switch req.Operation {
 		case "VALIDATE":
-			return n.stateMachine.ValidateTicket(req.TicketID, n.nodeID, req.Data)
+			err = n.stateMachine.ValidateTicket(req.TicketID, n.nodeID, req.Data)
 		case "CONSUME":
-			return n.stateMachine.ConsumeTicket(req.TicketID, n.nodeID)
+			err = n.stateMachine.ConsumeTicket(req.TicketID, n.nodeID)
 		case "DISPUTE":
-			return n.stateMachine.DisputeTicket(req.TicketID, n.nodeID)
+			err = n.stateMachine.DisputeTicket(req.TicketID, n.nodeID)
 		}
+		if err != nil {
+			return err
+		}
+		// Persist ticket to BoltDB so state survives node restarts
+		n.persistTicket(req.TicketID)
 		return nil
 	})
 
@@ -552,13 +575,26 @@ func (n *ValidatorNode) setupHandlers() {
 			protoState = pb.State_PENDING
 		}
 
-		// Create state update message with consensus confirmation
+		// Convert vector clock to protobuf format for proper causality ordering
+		// on receiving nodes (ensures MergeState can correctly compare versions)
+		var protoVC *pb.VectorClock
+		if ticket.VectorClock != nil {
+			protoVC = &pb.VectorClock{
+				Clocks: ticket.VectorClock.GetAll(),
+			}
+		}
+
+		// Create state update message with consensus confirmation.
+		// Include Data (as Metadata) and VectorClock so receiving nodes
+		// get the full ticket state and can properly order concurrent updates.
 		update := &pb.StateUpdate{
 			Tickets: []*pb.TicketState{{
 				TicketId:    ticket.ID,
 				State:       protoState,
 				ValidatorId: ticket.ValidatorID,
 				LastUpdated: ticket.Timestamp,
+				VectorClock: protoVC,
+				Metadata:    ticket.Data,
 			}},
 			NodeId: n.nodeID,
 		}
@@ -652,9 +688,10 @@ func (n *ValidatorNode) requestStateSync(peerID peer.ID) {
 
 	fmt.Printf("StateSync: Requesting state from peer %s (current seq: %d)\n", peerID, currentSeq)
 
-	// Create state sync request
+	// Create state sync request.
+	// Use libp2p peer ID (not nodeID) so the responder can SendTo us.
 	request := &pb.StateSyncRequest{
-		RequesterId:  n.nodeID,
+		RequesterId:  n.p2pHost.ID().String(),
 		LastSequence: currentSeq,
 		Timestamp:    time.Now().Unix(),
 	}
@@ -731,6 +768,7 @@ func (n *ValidatorNode) handleStateSyncRequest(payload []byte) error {
 			State:       protoState,
 			ValidatorId: ticket.ValidatorID,
 			LastUpdated: ticket.Timestamp,
+			Metadata:    ticket.Data,
 		})
 	}
 
@@ -807,10 +845,12 @@ func (n *ValidatorNode) handleStateSyncResponse(payload []byte) error {
 				fmt.Printf("StateSync: Syncing ticket %s from peer %s\n", pbTicket.TicketId, response.ResponderId)
 
 				// Add ticket to our state (bypassing consensus since it was already agreed upon)
-				if err := n.stateMachine.SyncTicket(pbTicket.TicketId, response.ResponderId, nil); err != nil {
+				if err := n.stateMachine.SyncTicket(pbTicket.TicketId, response.ResponderId, pbTicket.Metadata); err != nil {
 					fmt.Printf("StateSync: Failed to sync ticket %s: %v\n", pbTicket.TicketId, err)
 				} else {
 					syncedCount++
+					// Persist synced ticket to survive future restarts
+					n.persistTicket(pbTicket.TicketId)
 				}
 			}
 		}
@@ -903,9 +943,6 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 	}
 
 	// Non-primary nodes forward the request to all peers (primary will handle it)
-	// Note: For non-primary nodes, we still return immediately after forwarding
-	// because we don't have visibility into the consensus process
-	// TODO: In a future iteration, implement request tracking for non-primary nodes
 	primary := n.pbftNode.GetPrimary()
 	fmt.Printf("Node %s: 📤 Forwarding validation request for ticket %s to primary %s\n", n.nodeID, ticketID, primary)
 
@@ -928,15 +965,49 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 	}
 
 	// Broadcast to all peers (primary will pick it up)
-	ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
-	defer cancel()
-
-	if err := n.p2pHost.Broadcast(ctx, msgData); err != nil {
+	broadcastCtx, broadcastCancel := context.WithTimeout(n.ctx, 3*time.Second)
+	if err := n.p2pHost.Broadcast(broadcastCtx, msgData); err != nil {
+		broadcastCancel()
 		return fmt.Errorf("failed to forward request to primary: %w", err)
 	}
+	broadcastCancel()
 
-	fmt.Printf("Node %s: ✅ Successfully forwarded request for ticket %s to %d peers\n", n.nodeID, ticketID, peerCount)
-	return nil
+	fmt.Printf("Node %s: 📤 Successfully forwarded request for ticket %s to %d peers, waiting for consensus...\n", n.nodeID, ticketID, peerCount)
+
+	// Wait for consensus to replicate the ticket to this node.
+	// The primary will process the forwarded request, run PBFT consensus,
+	// and the StateReplicator will broadcast the committed state to all peers
+	// (including this node). Poll local state until the ticket appears.
+	// If the primary rejects due to insufficient peers or the broadcast is lost,
+	// retry the broadcast every 5 seconds.
+	consensusTimeout := 20 * time.Second
+	deadline := time.After(consensusTimeout)
+	pollInterval := 200 * time.Millisecond
+	retryInterval := 5 * time.Second
+	retryTicker := time.NewTicker(retryInterval)
+	defer retryTicker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			return fmt.Errorf("consensus timeout: validation for ticket %s did not complete within %v", ticketID, consensusTimeout)
+		case <-n.ctx.Done():
+			return fmt.Errorf("node shutting down")
+		case <-retryTicker.C:
+			// Re-broadcast in case primary rejected or message was lost
+			retryCtx, retryCancel := context.WithTimeout(n.ctx, 3*time.Second)
+			if err := n.p2pHost.Broadcast(retryCtx, msgData); err == nil {
+				fmt.Printf("Node %s: 🔄 Re-broadcast CLIENT_REQUEST for ticket %s\n", n.nodeID, ticketID)
+			}
+			retryCancel()
+		case <-time.After(pollInterval):
+			ticket, err := n.stateMachine.GetTicket(ticketID)
+			if err == nil && ticket != nil && ticket.State == state.StateValidated {
+				fmt.Printf("Node %s: ✅ Ticket %s confirmed validated via consensus replication\n", n.nodeID, ticketID)
+				return nil
+			}
+		}
+	}
 }
 
 func (n *ValidatorNode) ConsumeTicket(ticketID string) error {
@@ -1000,4 +1071,72 @@ func (n *ValidatorNode) GetConfig() (interface{}, error) {
 		"is_primary":   n.pbftNode.IsPrimary(),
 		"current_view": n.pbftNode.GetView(),
 	}, nil
+}
+
+// persistTicket saves a ticket's current state to BoltDB for crash recovery.
+func (n *ValidatorNode) persistTicket(ticketID string) {
+	ticket, err := n.stateMachine.GetTicket(ticketID)
+	if err != nil {
+		fmt.Printf("Node %s: ⚠️  Failed to get ticket %s for persistence: %v\n", n.nodeID, ticketID, err)
+		return
+	}
+
+	var vc map[string]uint64
+	if ticket.VectorClock != nil {
+		vc = ticket.VectorClock.GetAll()
+	}
+
+	record := &storage.TicketRecord{
+		ID:          ticket.ID,
+		State:       string(ticket.State),
+		Data:        ticket.Data,
+		ValidatorID: ticket.ValidatorID,
+		Timestamp:   ticket.Timestamp,
+		VectorClock: vc,
+		Metadata:    ticket.Metadata,
+	}
+
+	if err := n.storage.SaveTicket(record); err != nil {
+		fmt.Printf("Node %s: ⚠️  Failed to persist ticket %s: %v\n", n.nodeID, ticketID, err)
+	} else {
+		fmt.Printf("Node %s: 💾 Persisted ticket %s (state: %s)\n", n.nodeID, ticketID, ticket.State)
+	}
+}
+
+// loadTicketsFromStore loads all persisted tickets into the state machine on startup.
+func (n *ValidatorNode) loadTicketsFromStore() {
+	records, err := n.storage.GetAllTickets()
+	if err != nil {
+		fmt.Printf("Node %s: ⚠️  Failed to load tickets from store: %v\n", n.nodeID, err)
+		return
+	}
+
+	if len(records) == 0 {
+		return
+	}
+
+	tickets := make([]*state.Ticket, 0, len(records))
+	for _, rec := range records {
+		vc := state.NewVectorClock(n.nodeID)
+		for k, v := range rec.VectorClock {
+			vc.Update(k, v)
+		}
+
+		tickets = append(tickets, &state.Ticket{
+			ID:          rec.ID,
+			State:       state.TicketState(rec.State),
+			Data:        rec.Data,
+			ValidatorID: rec.ValidatorID,
+			Timestamp:   rec.Timestamp,
+			VectorClock: vc,
+			Metadata:    rec.Metadata,
+		})
+	}
+
+	if err := n.stateMachine.MergeState(tickets); err != nil {
+		fmt.Printf("Node %s: ⚠️  Failed to merge stored tickets: %v\n", n.nodeID, err)
+		return
+	}
+
+	fmt.Printf("Node %s: ✅ Loaded %d tickets from persistent store\n", n.nodeID, len(records))
 }

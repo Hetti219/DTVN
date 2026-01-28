@@ -17,7 +17,7 @@ const (
 	// ValidatorRendezvous is the namespace for validator node discovery
 	ValidatorRendezvous = "validator-network"
 	// DiscoveryInterval is how often we re-advertise and discover peers
-	DiscoveryInterval = 30 * time.Second
+	DiscoveryInterval = 10 * time.Second
 )
 
 // Discovery handles peer discovery using Kademlia DHT
@@ -40,15 +40,10 @@ type DiscoveryConfig struct {
 
 // NewDiscovery creates a new DHT-based peer discovery service
 func NewDiscovery(ctx context.Context, h host.Host, cfg *DiscoveryConfig) (*Discovery, error) {
-	// Create DHT options
-	var dhtOpts []dht.Option
-	if cfg.IsBootstrap {
-		// Bootstrap nodes run in server mode
-		dhtOpts = append(dhtOpts, dht.Mode(dht.ModeServer))
-	} else {
-		// Regular nodes run in client mode initially
-		dhtOpts = append(dhtOpts, dht.Mode(dht.ModeClient))
-	}
+	// All nodes run in server mode so they can be discovered by peers via DHT.
+	// Client mode prevents nodes from appearing in DHT routing, which breaks
+	// peer discovery between non-bootstrap nodes.
+	dhtOpts := []dht.Option{dht.Mode(dht.ModeServer)}
 
 	// Create the DHT
 	kdht, err := dht.New(ctx, h, dhtOpts...)
@@ -94,9 +89,19 @@ func (d *Discovery) Start() error {
 	fmt.Printf("Discovery: Running initial peer discovery...\n")
 	go d.discoverPeers()
 
-	// Run again after short delay to catch newly started nodes
-	time.AfterFunc(5*time.Second, func() {
+	// Run again after short delays to catch newly started nodes.
+	// Multiple passes with increasing delays ensure we discover peers
+	// that start up slightly after us.
+	time.AfterFunc(3*time.Second, func() {
 		fmt.Printf("Discovery: Running second discovery pass...\n")
+		d.discoverPeers()
+	})
+	time.AfterFunc(6*time.Second, func() {
+		fmt.Printf("Discovery: Running third discovery pass...\n")
+		d.discoverPeers()
+	})
+	time.AfterFunc(10*time.Second, func() {
+		fmt.Printf("Discovery: Running fourth discovery pass...\n")
 		d.discoverPeers()
 	})
 
