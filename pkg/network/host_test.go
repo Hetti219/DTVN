@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/crypto"
+	pb "github.com/libp2p/go-libp2p/core/crypto/pb"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,7 +66,7 @@ func TestGenerateDeterministicKey(t *testing.T) {
 		key, err := GenerateDeterministicKey("test-node")
 		require.NoError(t, err)
 
-		assert.Equal(t, crypto.Ed25519, key.Type())
+		assert.Equal(t, pb.KeyType_Ed25519, key.Type())
 	})
 }
 
@@ -630,9 +631,9 @@ func TestHostClose(t *testing.T) {
 		err = host.Close()
 		assert.NoError(t, err)
 
-		// Second close should error
+		// libp2p host close is idempotent
 		err = host.Close()
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("ContextCancellationOnClose", func(t *testing.T) {
