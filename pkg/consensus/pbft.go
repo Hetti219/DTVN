@@ -34,6 +34,7 @@ type PBFTNode struct {
 	requestLog   map[int64]*Request
 	messageQueue chan ConsensusMessage
 	viewTimer    *time.Timer
+	viewTimeout  time.Duration // Configurable view timeout for consensus
 	ctx          context.Context
 	cancel       context.CancelFunc
 	mu           sync.RWMutex
@@ -147,7 +148,10 @@ func NewPBFTNode(ctx context.Context, cfg *Config, broadcaster MessageBroadcaste
 
 	viewTimeout := cfg.ViewTimeout
 	if viewTimeout == 0 {
-		viewTimeout = 5 * time.Second
+		// Default to 15 seconds to allow sufficient time for PBFT three-phase commit
+		// across network latency. 5 seconds was too aggressive and caused premature
+		// view changes before PREPARE votes could be collected.
+		viewTimeout = 15 * time.Second
 	}
 
 	node := &PBFTNode{
@@ -163,6 +167,7 @@ func NewPBFTNode(ctx context.Context, cfg *Config, broadcaster MessageBroadcaste
 		requestLog:   make(map[int64]*Request),
 		messageQueue: make(chan ConsensusMessage, 1000),
 		viewTimer:    time.NewTimer(viewTimeout),
+		viewTimeout:  viewTimeout, // Store for consistent timer resets
 		ctx:          nodeCtx,
 		cancel:       cancel,
 		handlers:     make([]ConsensusHandler, 0),
@@ -508,7 +513,7 @@ func (n *PBFTNode) executeRequest(sequence int64) error {
 	n.state = StateIdle
 
 	// Reset view timer
-	n.viewTimer.Reset(5 * time.Second)
+	n.viewTimer.Reset(n.viewTimeout)
 
 	return nil
 }
@@ -522,22 +527,27 @@ func (n *PBFTNode) RegisterHandler(handler ConsensusHandler) {
 
 // processMessages processes incoming consensus messages
 func (n *PBFTNode) processMessages() {
+	fmt.Printf("PBFT: Node %s processMessages goroutine started\n", n.nodeID)
 	for {
 		select {
 		case <-n.ctx.Done():
+			fmt.Printf("PBFT: Node %s processMessages goroutine stopping (context cancelled)\n", n.nodeID)
 			return
 		case msg := <-n.messageQueue:
 			// Process based on message type
 			switch m := msg.(type) {
 			case *PrePrepareMsg:
+				fmt.Printf("PBFT: Node %s processing PRE_PREPARE from queue for seq %d\n", n.nodeID, m.Sequence)
 				if err := n.handlePrePrepare(m); err != nil {
 					fmt.Printf("Error handling PRE-PREPARE: %v\n", err)
 				}
 			case *PrepareMsg:
+				fmt.Printf("PBFT: Node %s processing PREPARE from queue (from %s for seq %d)\n", n.nodeID, m.NodeID, m.Sequence)
 				if err := n.HandlePrepare(m); err != nil {
 					fmt.Printf("Error handling PREPARE: %v\n", err)
 				}
 			case *CommitMsg:
+				fmt.Printf("PBFT: Node %s processing COMMIT from queue (from %s for seq %d)\n", n.nodeID, m.NodeID, m.Sequence)
 				if err := n.HandleCommit(m); err != nil {
 					fmt.Printf("Error handling COMMIT: %v\n", err)
 				}
@@ -568,7 +578,7 @@ func (n *PBFTNode) initiateViewChange() {
 	// Only trigger view change if there's a pending consensus operation
 	// If the node is idle, just reset the timer and continue
 	if n.state == StateIdle {
-		n.viewTimer.Reset(5 * time.Second)
+		n.viewTimer.Reset(n.viewTimeout)
 		return
 	}
 
@@ -589,7 +599,7 @@ func (n *PBFTNode) initiateViewChange() {
 
 	// Reset state
 	n.state = StateIdle
-	n.viewTimer.Reset(5 * time.Second)
+	n.viewTimer.Reset(n.viewTimeout)
 }
 
 // GetView returns the current view
@@ -630,14 +640,43 @@ func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
 	var msg ConsensusMessage
 	var err error
 
+	// Map message type to name for logging
+	msgTypeName := map[int32]string{
+		0: "PRE_PREPARE",
+		1: "PREPARE",
+		2: "COMMIT",
+		7: "CLIENT_REQUEST",
+	}[msgType]
+	if msgTypeName == "" {
+		msgTypeName = fmt.Sprintf("UNKNOWN(%d)", msgType)
+	}
+
+	fmt.Printf("PBFT: Node %s HandleNetworkMessage called with type %s (payload size: %d bytes)\n",
+		n.nodeID, msgTypeName, len(payload))
+
 	// Deserialize based on message type
 	switch msgType {
 	case 0: // PRE_PREPARE
 		msg, err = DeserializePrePrepare(payload)
+		if err == nil {
+			prePrepare := msg.(*PrePrepareMsg)
+			fmt.Printf("PBFT: Node %s deserialized PRE_PREPARE for seq %d, view %d\n",
+				n.nodeID, prePrepare.Sequence, prePrepare.View)
+		}
 	case 1: // PREPARE
 		msg, err = DeserializePrepare(payload)
+		if err == nil {
+			prepare := msg.(*PrepareMsg)
+			fmt.Printf("PBFT: Node %s deserialized PREPARE from %s for seq %d, view %d\n",
+				n.nodeID, prepare.NodeID, prepare.Sequence, prepare.View)
+		}
 	case 2: // COMMIT
 		msg, err = DeserializeCommit(payload)
+		if err == nil {
+			commit := msg.(*CommitMsg)
+			fmt.Printf("PBFT: Node %s deserialized COMMIT from %s for seq %d, view %d\n",
+				n.nodeID, commit.NodeID, commit.Sequence, commit.View)
+		}
 	case 7: // CLIENT_REQUEST - forwarded from non-primary node
 		// Deserialize the request
 		req, err := DeserializeRequest(payload)
@@ -659,16 +698,19 @@ func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
 	}
 
 	if err != nil {
+		fmt.Printf("PBFT: Node %s failed to deserialize %s message: %v\n", n.nodeID, msgTypeName, err)
 		return fmt.Errorf("failed to deserialize message: %w", err)
 	}
 
-	// Inject into message queue (this fixes the broken message flow)
+	// Inject into message queue
 	select {
 	case n.messageQueue <- msg:
+		fmt.Printf("PBFT: Node %s successfully queued %s message for processing\n", n.nodeID, msgTypeName)
 		return nil
 	case <-n.ctx.Done():
 		return n.ctx.Err()
 	default:
+		fmt.Printf("PBFT: Node %s message queue FULL, dropping %s message!\n", n.nodeID, msgTypeName)
 		return fmt.Errorf("message queue full, dropping message")
 	}
 }

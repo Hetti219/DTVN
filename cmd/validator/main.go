@@ -213,11 +213,14 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 	stateMachine := state.NewStateMachine(cfg.NodeID)
 
 	// Initialize PBFT consensus
+	// ViewTimeout of 15 seconds allows sufficient time for PBFT three-phase commit
+	// to complete across network latency. 5 seconds was too aggressive and caused
+	// premature view changes before PREPARE votes could be collected.
 	pbftNode, err := consensus.NewPBFTNode(ctx, &consensus.Config{
 		NodeID:      cfg.NodeID,
 		TotalNodes:  cfg.TotalNodes,
 		IsPrimary:   cfg.IsPrimary,
-		ViewTimeout: 5 * time.Second,
+		ViewTimeout: 15 * time.Second,
 	}, p2pHost)
 	if err != nil {
 		discovery.Close()
