@@ -111,12 +111,6 @@ release:
 
     Download the appropriate binary for your platform below.
 
-    ### Docker
-
-    ```bash
-    docker pull ghcr.io/hetti219/dtvn:{{.Version}}
-    ```
-
   footer: |
     ### Full Changelog
 
