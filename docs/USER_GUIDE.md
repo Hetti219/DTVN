@@ -59,15 +59,7 @@ The system allows multiple validator nodes to collaboratively validate, consume,
 
 ### Optional Software
 
-4. **Docker** (for containerized deployment)
-   - Download from: https://www.docker.com/get-started
-   - Verify installation: `docker --version`
-
-5. **Docker Compose** (for multi-node networks)
-   - Usually included with Docker Desktop
-   - Verify installation: `docker-compose --version`
-
-6. **Protocol Buffers Compiler** (for development only)
+4. **Protocol Buffers Compiler** (for development only)
    - Only needed if modifying `.proto` files
    - Install: `go install google.golang.org/protobuf/cmd/protoc-gen-go@latest`
 
@@ -223,19 +215,7 @@ go build -o bin/validator cmd/validator/main.go
 go build -o bin/simulator cmd/simulator/main.go
 ```
 
-### Docker Setup
-
-```bash
-# Build Docker image
-make docker-build
-
-# Run single validator in Docker
-make docker-run
-```
-
 ### Multi-Node Network Setup
-
-#### Option 1: Using Makefile (4 nodes)
 
 ```bash
 make run-network
@@ -246,22 +226,6 @@ This starts 4 validator nodes:
 - Node 1: ports 4002 (P2P), 8082 (API)
 - Node 2: ports 4003 (P2P), 8083 (API)
 - Node 3: ports 4004 (P2P), 8084 (API)
-
-#### Option 2: Using Docker Compose (7 nodes)
-
-```bash
-make docker-compose-up
-```
-
-This starts a complete network with:
-- 7 validator nodes
-- Prometheus monitoring (port 9999)
-- Grafana dashboards (port 3000)
-
-To stop:
-```bash
-make docker-compose-down
-```
 
 ---
 
@@ -386,32 +350,6 @@ Expected response: `{"status":"healthy"}`
 # Node 3
 ./bin/validator -id node3 -port 4004 -api-port 8083 -total-nodes 4 -data-dir ./data/node3 \
   -bootstrap "/ip4/127.0.0.1/tcp/4001"
-```
-
-### Docker Compose Deployment
-
-**Start the network:**
-```bash
-docker-compose up -d
-```
-
-**Check status:**
-```bash
-docker-compose ps
-```
-
-**View logs:**
-```bash
-# All nodes
-docker-compose logs -f
-
-# Specific node
-docker-compose logs -f validator-0
-```
-
-**Stop the network:**
-```bash
-docker-compose down
 ```
 
 ### Graceful Shutdown
@@ -925,19 +863,14 @@ scrape_configs:
 
 ### Grafana Setup
 
-**1. Start Grafana (if using Docker Compose):**
-```bash
-docker-compose up -d grafana
-```
-
-**2. Access Grafana:**
+**1. Access Grafana:**
 ```
 http://localhost:3000
 Username: admin
 Password: admin
 ```
 
-**3. Add Prometheus Data Source:**
+**2. Add Prometheus Data Source:**
 - Go to Configuration → Data Sources
 - Add Prometheus
 - URL: `http://prometheus:9090`
@@ -1100,10 +1033,6 @@ curl http://localhost:8080/api/v1/status | jq
 
 **Monitor logs:**
 ```bash
-# For Docker Compose
-docker-compose logs -f validator-0
-
-# For manual deployment
 tail -f ./logs/validator.log
 ```
 
@@ -1433,9 +1362,6 @@ make run-network
 
 # Run simulator
 make run-simulator
-
-# Docker Compose (7 nodes + monitoring)
-make docker-compose-up
 
 # Tests
 make test
