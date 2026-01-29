@@ -3,7 +3,7 @@ package consensus
 import (
 	"fmt"
 
-	pb "github.com/Hetti219/distributed-ticket-validation/proto"
+	pb "github.com/Hetti219/DTVN/proto"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -61,9 +61,18 @@ func SerializePrePrepare(msg *PrePrepareMsg) ([]byte, error) {
 
 // DeserializePrePrepare deserializes a PrePrepareMsg from protobuf format
 func DeserializePrePrepare(data []byte) (*PrePrepareMsg, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("cannot deserialize PrePrepare: empty payload")
+	}
+
 	prePrepare := &pb.PrePrepare{}
 	if err := proto.Unmarshal(data, prePrepare); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal PrePrepare: %w", err)
+	}
+
+	// Check that Request is not nil (required field for PrePrepare)
+	if prePrepare.Request == nil {
+		return nil, fmt.Errorf("invalid PrePrepare message: Request field is nil")
 	}
 
 	// Convert back to internal format
@@ -103,6 +112,10 @@ func SerializePrepare(msg *PrepareMsg) ([]byte, error) {
 
 // DeserializePrepare deserializes a PrepareMsg from protobuf format
 func DeserializePrepare(data []byte) (*PrepareMsg, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("cannot deserialize Prepare: empty payload")
+	}
+
 	prepare := &pb.Prepare{}
 	if err := proto.Unmarshal(data, prepare); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal Prepare: %w", err)

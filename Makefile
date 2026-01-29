@@ -1,11 +1,9 @@
-.PHONY: all build clean test run-validator run-simulator docker-build docker-run help
+.PHONY: all build clean test test-coverage test-unit test-integration integration-test run-validator run-simulator help
 
 # Variables
 BINARY_NAME=validator
 SIMULATOR_NAME=simulator
 GO=go
-DOCKER=docker
-DOCKER_IMAGE=dtvn-validator
 
 # Build all binaries
 all: build
@@ -26,16 +24,54 @@ clean:
 	rm -rf *.db
 	@echo "Clean complete!"
 
-# Run tests
+# Run all tests (unit + integration)
 test:
-	@echo "Running tests..."
+	@echo "Running all tests..."
 	$(GO) test -v ./...
+
+# Run unit tests only (fast)
+test-unit:
+	@echo "Running unit tests..."
+	$(GO) test -v -short ./...
 
 # Run tests with coverage
 test-coverage:
 	@echo "Running tests with coverage..."
 	$(GO) test -v -coverprofile=coverage.out ./...
 	$(GO) tool cover -html=coverage.out -o coverage.html
+
+# Run integration tests
+test-integration: build
+	@echo "Running integration tests..."
+	@chmod +x scripts/run-integration-tests.sh
+	@./scripts/run-integration-tests.sh
+
+# Run integration tests with verbose output
+test-integration-verbose: build
+	@echo "Running integration tests (verbose)..."
+	@chmod +x scripts/run-integration-tests.sh
+	@./scripts/run-integration-tests.sh -v
+
+# Run specific integration test
+test-integration-single: build
+	@echo "Running single integration test: $(TEST)"
+	@chmod +x scripts/run-integration-tests.sh
+	@./scripts/run-integration-tests.sh --pattern $(TEST)
+
+# Run integration tests in parallel (faster)
+test-integration-parallel: build
+	@echo "Running integration tests in parallel..."
+	@chmod +x scripts/run-integration-tests.sh
+	@./scripts/run-integration-tests.sh -p
+
+# Run integration tests and keep artifacts for debugging
+test-integration-debug: build
+	@echo "Running integration tests (debug mode)..."
+	@chmod +x scripts/run-integration-tests.sh
+	@./scripts/run-integration-tests.sh -v --no-cleanup
+
+# Alias for backwards compatibility
+integration-test: test-integration
 
 # Run linter
 lint:
@@ -118,30 +154,6 @@ run-simulator-partition:
 		-packet-loss 0.05 \
 		-partition
 
-# Build Docker image
-docker-build:
-	@echo "Building Docker image..."
-	$(DOCKER) build -t $(DOCKER_IMAGE):latest .
-
-# Run Docker container
-docker-run:
-	@echo "Running Docker container..."
-	$(DOCKER) run -d \
-		-p 4001:4001 \
-		-p 8080:8080 \
-		-p 9090:9090 \
-		--name validator-1 \
-		$(DOCKER_IMAGE):latest
-
-# Run Docker Compose (multi-node network)
-docker-compose-up:
-	@echo "Starting Docker Compose network..."
-	docker compose up -d
-
-docker-compose-down:
-	@echo "Stopping Docker Compose network..."
-	docker compose down
-
 # Install dependencies
 deps:
 	@echo "Installing dependencies..."
@@ -157,24 +169,41 @@ dev-setup: deps
 # Help
 help:
 	@echo "Available targets:"
-	@echo "  all                  - Build all binaries"
-	@echo "  build                - Build validator and simulator"
-	@echo "  clean                - Clean build artifacts"
-	@echo "  test                 - Run tests"
-	@echo "  test-coverage        - Run tests with coverage"
-	@echo "  lint                 - Run linter"
-	@echo "  fmt                  - Format code"
-	@echo "  tidy                 - Tidy dependencies"
-	@echo "  proto                - Generate protocol buffers"
-	@echo "  run-validator        - Run a single validator node"
-	@echo "  run-bootstrap        - Run a bootstrap node"
-	@echo "  run-network          - Run a network of 4 validators"
-	@echo "  run-simulator        - Run the network simulator"
-	@echo "  run-simulator-partition - Run simulator with partitions"
-	@echo "  docker-build         - Build Docker image"
-	@echo "  docker-run           - Run Docker container"
-	@echo "  docker-compose-up    - Start Docker Compose network"
-	@echo "  docker-compose-down  - Stop Docker Compose network"
-	@echo "  deps                 - Install dependencies"
-	@echo "  dev-setup            - Setup development environment"
-	@echo "  help                 - Show this help message"
+	@echo ""
+	@echo "Build & Clean:"
+	@echo "  all                         - Build all binaries"
+	@echo "  build                       - Build validator and simulator"
+	@echo "  clean                       - Clean build artifacts"
+	@echo ""
+	@echo "Testing:"
+	@echo "  test                        - Run all tests (unit + integration)"
+	@echo "  test-unit                   - Run unit tests only (fast)"
+	@echo "  test-coverage               - Run tests with coverage report"
+	@echo "  test-integration            - Run integration tests"
+	@echo "  test-integration-verbose    - Run integration tests (verbose)"
+	@echo "  test-integration-parallel   - Run integration tests in parallel"
+	@echo "  test-integration-debug      - Run integration tests (keep artifacts)"
+	@echo "  test-integration-single     - Run single test (use TEST=name)"
+	@echo ""
+	@echo "Code Quality:"
+	@echo "  lint                        - Run linter"
+	@echo "  fmt                         - Format code"
+	@echo "  tidy                        - Tidy dependencies"
+	@echo "  proto                       - Generate protocol buffers"
+	@echo ""
+	@echo "Running Nodes:"
+	@echo "  run-validator               - Run a single validator node"
+	@echo "  run-bootstrap               - Run a bootstrap node"
+	@echo "  run-network                 - Run a network of 4 validators"
+	@echo "  run-simulator               - Run the network simulator"
+	@echo "  run-simulator-partition     - Run simulator with partitions"
+	@echo ""
+	@echo "Setup:"
+	@echo "  deps                        - Install dependencies"
+	@echo "  dev-setup                   - Setup development environment"
+	@echo "  help                        - Show this help message"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make test-integration"
+	@echo "  make test-integration-single TEST=TestSingleTicketValidation"
+	@echo "  make test-integration-debug"

@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package validator;
 
-option go_package = "github.com/Hetti219/distributed-ticket-validation/proto";
+option go_package = "github.com/Hetti219/DTVN/proto";
 
 // ValidatorMessage is the main message type for communication between validators
 message ValidatorMessage {

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/libp2p/go-libp2p"
@@ -336,18 +337,29 @@ func (p *P2PHost) handleStream(stream network.Stream) {
 
 	peerID := stream.Conn().RemotePeer()
 
-	// Read message length
+	// Read message length - use io.ReadFull to ensure we read all 4 bytes
+	// Note: stream.Read() may return fewer bytes than requested, causing
+	// corrupted message length parsing and subsequent message routing failures
 	lenBuf := make([]byte, 4)
-	if _, err := stream.Read(lenBuf); err != nil {
+	if _, err := io.ReadFull(stream, lenBuf); err != nil {
 		fmt.Printf("Error reading message length from peer %s: %v\n", peerID, err)
 		return
 	}
 
 	msgLen := uint32(lenBuf[0])<<24 | uint32(lenBuf[1])<<16 | uint32(lenBuf[2])<<8 | uint32(lenBuf[3])
 
-	// Read message data
+	// Sanity check message length to prevent memory exhaustion
+	const maxMsgLen = 10 * 1024 * 1024 // 10MB max
+	if msgLen > maxMsgLen {
+		fmt.Printf("Error: message length %d exceeds maximum %d from peer %s\n", msgLen, maxMsgLen, peerID)
+		return
+	}
+
+	// Read message data - use io.ReadFull to ensure we read the complete message
+	// This is critical: partial reads cause message deserialization failures
+	// which break PBFT consensus (PREPARE messages never reach the handler)
 	data := make([]byte, msgLen)
-	if _, err := stream.Read(data); err != nil {
+	if _, err := io.ReadFull(stream, data); err != nil {
 		fmt.Printf("Error reading message data from peer %s: %v\n", peerID, err)
 		return
 	}

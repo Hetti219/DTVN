@@ -61,7 +61,6 @@ The system can tolerate up to `f` Byzantine (malicious) nodes where `f = (n-1)/3
 
 ### Prerequisites
 - Go 1.21 or higher
-- Docker (optional, for containerized deployment)
 - protoc (optional, for protocol buffer generation)
 
 ### Building from Source
@@ -120,19 +119,6 @@ Or manually (peer IDs are deterministic based on node ID):
 # Terminal 4: Validator node 3
 ./bin/validator -id node3 -port 4004 -api-port 8084 -data-dir ./data/node3 -total-nodes 4 \
   -bootstrap "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWLtBkKrip2jyaRzhUphqYyVXGUPMMbmpBWHZMYXaueb9C"
-```
-
-### Using Docker Compose
-
-```bash
-# Build and start the network (7 validators + monitoring)
-docker-compose up -d
-
-# View logs
-docker-compose logs -f
-
-# Stop the network
-docker-compose down
 ```
 
 ## API Usage
@@ -353,7 +339,6 @@ The system tolerates up to `f` Byzantine nodes where:
 ├── proto/                  # Protocol buffer definitions
 ├── config/                 # Configuration files
 ├── test/                   # Tests
-├── docker/                 # Docker files
 ├── Makefile               # Build automation
 └── README.md              # This file
 ```

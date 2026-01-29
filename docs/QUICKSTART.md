@@ -5,7 +5,6 @@
 - Go 1.21+
 - Git
 - Make (optional but recommended)
-- Docker & Docker Compose (for containerized deployment)
 
 ## 1. Build the Project
 
@@ -62,8 +61,6 @@ curl http://localhost:8080/api/v1/stats
 
 ## 4. Run a Full Network (4 Validators)
 
-### Option A: Using Make
-
 ```bash
 make run-network
 ```
@@ -73,17 +70,6 @@ This starts 4 validator nodes:
 - node1: replica, P2P=4002, API=8082
 - node2: replica, P2P=4003, API=8083
 - node3: replica, P2P=4004, API=8084
-
-### Option B: Using Docker Compose
-
-```bash
-docker-compose up -d
-```
-
-This starts:
-- 7 validator nodes
-- Prometheus (metrics): http://localhost:9999
-- Grafana (dashboards): http://localhost:3000
 
 ## 5. Run the Network Simulator
 
@@ -216,11 +202,6 @@ make test
 
 # Clean up
 make clean
-
-# Docker
-docker-compose up -d       # Start
-docker-compose logs -f     # View logs
-docker-compose down        # Stop
 ```
 
 ## Support

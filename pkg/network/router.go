@@ -3,8 +3,8 @@ package network
 import (
 	"fmt"
 
-	"github.com/Hetti219/distributed-ticket-validation/pkg/consensus"
-	pb "github.com/Hetti219/distributed-ticket-validation/proto"
+	"github.com/Hetti219/DTVN/pkg/consensus"
+	pb "github.com/Hetti219/DTVN/proto"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"google.golang.org/protobuf/proto"
 )

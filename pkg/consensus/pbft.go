@@ -34,12 +34,22 @@ type PBFTNode struct {
 	requestLog   map[int64]*Request
 	messageQueue chan ConsensusMessage
 	viewTimer    *time.Timer
+	viewTimeout  time.Duration // Configurable view timeout for consensus
 	ctx          context.Context
 	cancel       context.CancelFunc
 	mu           sync.RWMutex
 	handlers     []ConsensusHandler
 	broadcaster  MessageBroadcaster
 	checkpoints  map[int64]*Checkpoint
+
+	// Callback mechanism for synchronous consensus waiting
+	// Maps request ID to callback function
+	requestCallbacks map[string]ConsensusCallback
+	callbackMu       sync.Mutex
+
+	// State replicator - called after consensus commits to ensure reliable state propagation
+	// This provides reliable delivery beyond probabilistic gossip
+	stateReplicator StateReplicator
 }
 
 // PrepareMsg represents a PREPARE message
@@ -123,6 +133,16 @@ type ConsensusMessage interface {
 // ConsensusHandler is called when consensus is reached
 type ConsensusHandler func(*Request) error
 
+// ConsensusCallback is called when consensus completes or fails for a specific request
+// This enables synchronous API responses that wait for consensus
+type ConsensusCallback func(success bool, err error)
+
+// StateReplicator is called after consensus commits to ensure reliable state propagation
+// to all peers. This provides guaranteed delivery beyond probabilistic gossip.
+// The replicator receives the request that was committed and should broadcast the
+// resulting state to all connected peers.
+type StateReplicator func(req *Request) error
+
 // MessageBroadcaster interface for broadcasting messages
 type MessageBroadcaster interface {
 	Broadcast(ctx context.Context, data []byte) error
@@ -147,27 +167,32 @@ func NewPBFTNode(ctx context.Context, cfg *Config, broadcaster MessageBroadcaste
 
 	viewTimeout := cfg.ViewTimeout
 	if viewTimeout == 0 {
-		viewTimeout = 5 * time.Second
+		// Default to 15 seconds to allow sufficient time for PBFT three-phase commit
+		// across network latency. 5 seconds was too aggressive and caused premature
+		// view changes before PREPARE votes could be collected.
+		viewTimeout = 15 * time.Second
 	}
 
 	node := &PBFTNode{
-		nodeID:       cfg.NodeID,
-		view:         0,
-		sequence:     0,
-		state:        StateIdle,
-		f:            f,
-		totalNodes:   cfg.TotalNodes,
-		isPrimary:    cfg.IsPrimary,
-		prepareLog:   make(map[int64]map[string]*PrepareMsg),
-		commitLog:    make(map[int64]map[string]*CommitMsg),
-		requestLog:   make(map[int64]*Request),
-		messageQueue: make(chan ConsensusMessage, 1000),
-		viewTimer:    time.NewTimer(viewTimeout),
-		ctx:          nodeCtx,
-		cancel:       cancel,
-		handlers:     make([]ConsensusHandler, 0),
-		broadcaster:  broadcaster,
-		checkpoints:  make(map[int64]*Checkpoint),
+		nodeID:           cfg.NodeID,
+		view:             0,
+		sequence:         0,
+		state:            StateIdle,
+		f:                f,
+		totalNodes:       cfg.TotalNodes,
+		isPrimary:        cfg.IsPrimary,
+		prepareLog:       make(map[int64]map[string]*PrepareMsg),
+		commitLog:        make(map[int64]map[string]*CommitMsg),
+		requestLog:       make(map[int64]*Request),
+		messageQueue:     make(chan ConsensusMessage, 1000),
+		viewTimer:        time.NewTimer(viewTimeout),
+		viewTimeout:      viewTimeout, // Store for consistent timer resets
+		ctx:              nodeCtx,
+		cancel:           cancel,
+		handlers:         make([]ConsensusHandler, 0),
+		broadcaster:      broadcaster,
+		checkpoints:      make(map[int64]*Checkpoint),
+		requestCallbacks: make(map[string]ConsensusCallback),
 	}
 
 	return node, nil
@@ -487,7 +512,8 @@ func (n *PBFTNode) moveToCommitPhase(sequence int64, digest string) error {
 func (n *PBFTNode) executeRequest(sequence int64) error {
 	req, exists := n.requestLog[sequence]
 	if !exists {
-		return fmt.Errorf("request not found for sequence %d", sequence)
+		err := fmt.Errorf("request not found for sequence %d", sequence)
+		return err
 	}
 
 	fmt.Printf("PBFT: ✅ Consensus reached for seq %d, executing request for ticket %s\n", sequence, req.TicketID)
@@ -495,20 +521,44 @@ func (n *PBFTNode) executeRequest(sequence int64) error {
 	n.state = StateCommitted
 
 	// Call registered handlers
+	var handlerErr error
 	for _, handler := range n.handlers {
 		if err := handler(req); err != nil {
 			fmt.Printf("PBFT: Handler error: %v\n", err)
-			return err
+			handlerErr = err
+			break
 		}
 	}
 
+	// Invoke callback for this request (notifies waiting API call)
+	if handlerErr != nil {
+		n.invokeCallback(req.RequestID, false, handlerErr)
+		return handlerErr
+	}
+
 	fmt.Printf("PBFT: ✅ Request executed successfully for ticket %s\n", req.TicketID)
+
+	// Call state replicator to ensure reliable state propagation to all peers
+	// This provides guaranteed delivery beyond probabilistic gossip by directly
+	// broadcasting state updates to all connected peers after consensus commits.
+	if n.stateReplicator != nil {
+		if err := n.stateReplicator(req); err != nil {
+			// Log the error but don't fail - state was applied locally and gossip
+			// will eventually propagate it via anti-entropy
+			fmt.Printf("PBFT: Warning - State replication failed (will retry via anti-entropy): %v\n", err)
+		} else {
+			fmt.Printf("PBFT: ✅ State replicated to all peers for ticket %s\n", req.TicketID)
+		}
+	}
+
+	// Invoke callback with success
+	n.invokeCallback(req.RequestID, true, nil)
 
 	// Reset to idle
 	n.state = StateIdle
 
 	// Reset view timer
-	n.viewTimer.Reset(5 * time.Second)
+	n.viewTimer.Reset(n.viewTimeout)
 
 	return nil
 }
@@ -520,24 +570,86 @@ func (n *PBFTNode) RegisterHandler(handler ConsensusHandler) {
 	n.handlers = append(n.handlers, handler)
 }
 
+// RegisterCallback registers a callback for a specific request that will be called
+// when consensus completes (success or failure). This enables synchronous API responses.
+func (n *PBFTNode) RegisterCallback(requestID string, callback ConsensusCallback) {
+	n.callbackMu.Lock()
+	defer n.callbackMu.Unlock()
+	n.requestCallbacks[requestID] = callback
+}
+
+// RegisterStateReplicator registers a callback that is invoked after consensus commits
+// to ensure reliable state propagation to all peers. This provides guaranteed delivery
+// beyond probabilistic gossip by directly broadcasting state updates to all connected peers.
+func (n *PBFTNode) RegisterStateReplicator(replicator StateReplicator) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.stateReplicator = replicator
+}
+
+// unregisterCallback removes a callback for a request
+func (n *PBFTNode) unregisterCallback(requestID string) {
+	n.callbackMu.Lock()
+	defer n.callbackMu.Unlock()
+	delete(n.requestCallbacks, requestID)
+}
+
+// invokeCallback calls and removes the callback for a request
+func (n *PBFTNode) invokeCallback(requestID string, success bool, err error) {
+	n.callbackMu.Lock()
+	callback, exists := n.requestCallbacks[requestID]
+	if exists {
+		delete(n.requestCallbacks, requestID)
+	}
+	n.callbackMu.Unlock()
+
+	if exists && callback != nil {
+		// Call the callback asynchronously to avoid blocking consensus
+		go callback(success, err)
+	}
+}
+
+// failPendingCallbacks fails all pending callbacks (e.g., on view change)
+func (n *PBFTNode) failPendingCallbacks(reason string) {
+	n.callbackMu.Lock()
+	callbacks := make(map[string]ConsensusCallback)
+	for k, v := range n.requestCallbacks {
+		callbacks[k] = v
+	}
+	n.requestCallbacks = make(map[string]ConsensusCallback)
+	n.callbackMu.Unlock()
+
+	// Invoke all callbacks with failure
+	for requestID, callback := range callbacks {
+		if callback != nil {
+			go callback(false, fmt.Errorf("consensus failed: %s (request: %s)", reason, requestID))
+		}
+	}
+}
+
 // processMessages processes incoming consensus messages
 func (n *PBFTNode) processMessages() {
+	fmt.Printf("PBFT: Node %s processMessages goroutine started\n", n.nodeID)
 	for {
 		select {
 		case <-n.ctx.Done():
+			fmt.Printf("PBFT: Node %s processMessages goroutine stopping (context cancelled)\n", n.nodeID)
 			return
 		case msg := <-n.messageQueue:
 			// Process based on message type
 			switch m := msg.(type) {
 			case *PrePrepareMsg:
+				fmt.Printf("PBFT: Node %s processing PRE_PREPARE from queue for seq %d\n", n.nodeID, m.Sequence)
 				if err := n.handlePrePrepare(m); err != nil {
 					fmt.Printf("Error handling PRE-PREPARE: %v\n", err)
 				}
 			case *PrepareMsg:
+				fmt.Printf("PBFT: Node %s processing PREPARE from queue (from %s for seq %d)\n", n.nodeID, m.NodeID, m.Sequence)
 				if err := n.HandlePrepare(m); err != nil {
 					fmt.Printf("Error handling PREPARE: %v\n", err)
 				}
 			case *CommitMsg:
+				fmt.Printf("PBFT: Node %s processing COMMIT from queue (from %s for seq %d)\n", n.nodeID, m.NodeID, m.Sequence)
 				if err := n.HandleCommit(m); err != nil {
 					fmt.Printf("Error handling COMMIT: %v\n", err)
 				}
@@ -563,12 +675,12 @@ func (n *PBFTNode) monitorViewTimeout() {
 // initiateViewChange initiates a view change
 func (n *PBFTNode) initiateViewChange() {
 	n.mu.Lock()
-	defer n.mu.Unlock()
 
 	// Only trigger view change if there's a pending consensus operation
 	// If the node is idle, just reset the timer and continue
 	if n.state == StateIdle {
-		n.viewTimer.Reset(5 * time.Second)
+		n.viewTimer.Reset(n.viewTimeout)
+		n.mu.Unlock()
 		return
 	}
 
@@ -589,7 +701,12 @@ func (n *PBFTNode) initiateViewChange() {
 
 	// Reset state
 	n.state = StateIdle
-	n.viewTimer.Reset(5 * time.Second)
+	n.viewTimer.Reset(n.viewTimeout)
+
+	n.mu.Unlock()
+
+	// Fail all pending callbacks - consensus did not complete
+	n.failPendingCallbacks("view timeout")
 }
 
 // GetView returns the current view
@@ -630,14 +747,43 @@ func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
 	var msg ConsensusMessage
 	var err error
 
+	// Map message type to name for logging
+	msgTypeName := map[int32]string{
+		0: "PRE_PREPARE",
+		1: "PREPARE",
+		2: "COMMIT",
+		7: "CLIENT_REQUEST",
+	}[msgType]
+	if msgTypeName == "" {
+		msgTypeName = fmt.Sprintf("UNKNOWN(%d)", msgType)
+	}
+
+	fmt.Printf("PBFT: Node %s HandleNetworkMessage called with type %s (payload size: %d bytes)\n",
+		n.nodeID, msgTypeName, len(payload))
+
 	// Deserialize based on message type
 	switch msgType {
 	case 0: // PRE_PREPARE
 		msg, err = DeserializePrePrepare(payload)
+		if err == nil {
+			prePrepare := msg.(*PrePrepareMsg)
+			fmt.Printf("PBFT: Node %s deserialized PRE_PREPARE for seq %d, view %d\n",
+				n.nodeID, prePrepare.Sequence, prePrepare.View)
+		}
 	case 1: // PREPARE
 		msg, err = DeserializePrepare(payload)
+		if err == nil {
+			prepare := msg.(*PrepareMsg)
+			fmt.Printf("PBFT: Node %s deserialized PREPARE from %s for seq %d, view %d\n",
+				n.nodeID, prepare.NodeID, prepare.Sequence, prepare.View)
+		}
 	case 2: // COMMIT
 		msg, err = DeserializeCommit(payload)
+		if err == nil {
+			commit := msg.(*CommitMsg)
+			fmt.Printf("PBFT: Node %s deserialized COMMIT from %s for seq %d, view %d\n",
+				n.nodeID, commit.NodeID, commit.Sequence, commit.View)
+		}
 	case 7: // CLIENT_REQUEST - forwarded from non-primary node
 		// Deserialize the request
 		req, err := DeserializeRequest(payload)
@@ -659,16 +805,19 @@ func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
 	}
 
 	if err != nil {
+		fmt.Printf("PBFT: Node %s failed to deserialize %s message: %v\n", n.nodeID, msgTypeName, err)
 		return fmt.Errorf("failed to deserialize message: %w", err)
 	}
 
-	// Inject into message queue (this fixes the broken message flow)
+	// Inject into message queue
 	select {
 	case n.messageQueue <- msg:
+		fmt.Printf("PBFT: Node %s successfully queued %s message for processing\n", n.nodeID, msgTypeName)
 		return nil
 	case <-n.ctx.Done():
 		return n.ctx.Err()
 	default:
+		fmt.Printf("PBFT: Node %s message queue FULL, dropping %s message!\n", n.nodeID, msgTypeName)
 		return fmt.Errorf("message queue full, dropping message")
 	}
 }
