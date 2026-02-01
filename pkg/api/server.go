@@ -93,7 +93,7 @@ func NewServer(ctx context.Context, cfg *Config, validator ValidatorInterface) (
 		Addr:         addr,
 		Handler:      s.router,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 30 * time.Second, // Must exceed consensus timeout (20s) for non-primary forwarding
 		IdleTimeout:  60 * time.Second,
 	}
 

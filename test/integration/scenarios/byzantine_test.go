@@ -54,8 +54,8 @@ func TestByzantineNodeTolerance(t *testing.T) {
 	numTickets := 5
 	tickets := fixtures.GenerateTickets(cfg.TicketPrefix, numTickets)
 
-	// Validate tickets on honest nodes
-	successCount := 0
+	// Validate tickets on honest nodes, tracking which ones actually succeed
+	validatedTickets := make([]*fixtures.TestTicket, 0)
 	for i, ticket := range tickets {
 		// Use honest node (not Byzantine)
 		nodeIdx := (i % (cfg.NumNodes - len(cfg.ByzantineNodes))) + 1
@@ -72,15 +72,20 @@ func TestByzantineNodeTolerance(t *testing.T) {
 			continue
 		}
 
-		successCount++
+		validatedTickets = append(validatedTickets, ticket)
 		fmt.Printf("✓ Ticket %d validated successfully\n", i)
 	}
 
-	assert.Greater(t, successCount, 0, "No tickets were validated")
+	assert.Greater(t, len(validatedTickets), 0, "No tickets were validated")
 
-	// Wait for consensus
+	// Wait for consensus on each validated ticket using polling
 	fmt.Println("Waiting for consensus on all tickets...")
-	time.Sleep(cfg.ConsensusWaitTime * 2) // Extra time with Byzantine nodes
+	for _, ticket := range validatedTickets {
+		err := cluster.WaitForConsensus(ticket.ID, cfg.ConsensusWaitTime*3)
+		if err != nil {
+			t.Logf("Consensus wait for ticket %s: %v", ticket.ID, err)
+		}
+	}
 
 	// Verify honest nodes reached consensus
 	honestNodes := make([]*testutil.TestNode, 0)
@@ -92,7 +97,7 @@ func TestByzantineNodeTolerance(t *testing.T) {
 
 	// Check that honest nodes have consistent state
 	consensusCount := 0
-	for _, ticket := range tickets[:successCount] {
+	for _, ticket := range validatedTickets {
 		validatedOnHonest := 0
 
 		for _, node := range honestNodes {
@@ -123,7 +128,7 @@ func TestByzantineNodeTolerance(t *testing.T) {
 		}
 	}
 
-	assert.Equal(t, successCount, consensusCount,
+	assert.Equal(t, len(validatedTickets), consensusCount,
 		"Not all tickets reached consensus among honest nodes")
 
 	// Verify state consistency among honest nodes only
@@ -180,9 +185,13 @@ func TestByzantineLeader(t *testing.T) {
 		t.Logf("Initial validation failed: %v", err)
 	}
 
-	// Wait for consensus with extended timeout
+	// Wait for consensus using polling
 	// If Byzantine node is leader, view change may be needed
-	time.Sleep(cfg.ConsensusWaitTime * 3)
+	if err == nil {
+		if waitErr := cluster.WaitForConsensus(ticket.ID, cfg.ConsensusWaitTime*3); waitErr != nil {
+			t.Logf("Consensus polling: %v", waitErr)
+		}
+	}
 
 	// Check if honest nodes reached consensus
 	healthyHonest := 0
