@@ -138,6 +138,11 @@ func TestNetworkPartitionRecovery(t *testing.T) {
 
 	fmt.Println("✓ Phase 3: Partition healed")
 
+	// Wait for anti-entropy to propagate state to recovered nodes
+	// Anti-entropy runs every 5 seconds, so wait for 3-4 cycles
+	fmt.Println("Waiting for anti-entropy to propagate state (20s)...")
+	time.Sleep(20 * time.Second)
+
 	// Phase 5: Verify state reconciliation
 	fmt.Println("Verifying state reconciliation...")
 
