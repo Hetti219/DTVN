@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // SimulatorStatus represents the status of the simulator
@@ -74,6 +75,11 @@ type SimulatorController struct {
 	progressCallback func(progress *SimulatorProgress)
 	statusCallback   func(status SimulatorStatus)
 	resultCallback   func(results *SimulatorResults)
+
+	// Deduplication fields
+	dedupMu      sync.Mutex
+	recentLines  map[string]time.Time
+	dedupWindow  time.Duration
 }
 
 // SimulatorControllerConfig holds controller configuration
@@ -102,6 +108,8 @@ func NewSimulatorController(cfg *SimulatorControllerConfig) *SimulatorController
 		progressCallback: cfg.ProgressCallback,
 		statusCallback:   cfg.StatusCallback,
 		resultCallback:   cfg.ResultCallback,
+		recentLines:      make(map[string]time.Time),
+		dedupWindow:      500 * time.Millisecond, // Deduplicate within 500ms window
 	}
 }
 
@@ -212,6 +220,36 @@ func (s *SimulatorController) runSimulator(config *SimulatorConfig) {
 	s.notifyStatus(status)
 }
 
+// isDuplicateLine checks if a line was recently seen (within deduplication window)
+func (s *SimulatorController) isDuplicateLine(line string) bool {
+	s.dedupMu.Lock()
+	defer s.dedupMu.Unlock()
+
+	now := time.Now()
+
+	// Check if line was recently seen
+	if lastSeen, exists := s.recentLines[line]; exists {
+		if now.Sub(lastSeen) < s.dedupWindow {
+			// Update timestamp for this line
+			s.recentLines[line] = now
+			return true
+		}
+	}
+
+	// Mark line as seen
+	s.recentLines[line] = now
+
+	// Clean up old entries (older than 2x dedup window)
+	cleanupThreshold := now.Add(-2 * s.dedupWindow)
+	for key, timestamp := range s.recentLines {
+		if timestamp.Before(cleanupThreshold) {
+			delete(s.recentLines, key)
+		}
+	}
+
+	return false
+}
+
 // streamOutput streams output from the simulator
 func (s *SimulatorController) streamOutput(reader io.Reader) {
 	scanner := bufio.NewScanner(reader)
@@ -265,8 +303,9 @@ func (s *SimulatorController) streamOutput(reader io.Reader) {
 			s.parseResultLine(matches[1], matches[2])
 		}
 
-		// Notify output callback
-		if s.outputCallback != nil {
+		// Notify output callback (with deduplication)
+		// Check if this line was recently seen from the other stream (stdout/stderr)
+		if s.outputCallback != nil && !s.isDuplicateLine(line) {
 			s.outputCallback(line)
 		}
 	}
