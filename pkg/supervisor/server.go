@@ -23,6 +23,7 @@ type Server struct {
 	simController  *SimulatorController
 	wsClients      map[*websocket.Conn]bool
 	wsMu           sync.RWMutex
+	wsWriteMu      sync.Mutex // Serializes WebSocket writes to prevent concurrent write panic
 	wsUpgrader     websocket.Upgrader
 	staticDir      string
 }
@@ -501,14 +502,23 @@ func (s *Server) handleWSMessages(conn *websocket.Conn) {
 }
 
 func (s *Server) sendWSMessage(conn *websocket.Conn, msg map[string]interface{}) {
+	s.wsWriteMu.Lock()
+	defer s.wsWriteMu.Unlock()
 	conn.WriteJSON(msg)
 }
 
 func (s *Server) broadcastWSMessage(msg map[string]interface{}) {
 	s.wsMu.RLock()
-	defer s.wsMu.RUnlock()
-
+	clients := make([]*websocket.Conn, 0, len(s.wsClients))
 	for conn := range s.wsClients {
+		clients = append(clients, conn)
+	}
+	s.wsMu.RUnlock()
+
+	// Write to all clients with write lock to prevent concurrent writes
+	s.wsWriteMu.Lock()
+	defer s.wsWriteMu.Unlock()
+	for _, conn := range clients {
 		conn.WriteJSON(msg)
 	}
 }
