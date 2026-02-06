@@ -8,11 +8,18 @@ export class NetworkViz {
         this.simulation = null;
         this.svg = null;
         this.g = null;
-        this.currentNode = null;
+        this.zoom = null;
         this.isSupervisorMode = false;
+        this._wsHandlers = [];
+        this._loadTimer = null;
+        this._isLoading = false;
+        this._pendingLoad = false;
     }
 
     async render(container) {
+        // Clean up previous WebSocket handlers to prevent accumulation
+        this._cleanupWS();
+
         container.innerHTML = `
             <div class="page-header">
                 <h2 class="page-title">Network Topology</h2>
@@ -21,7 +28,7 @@ export class NetworkViz {
 
             <div class="card">
                 <div class="card-header">
-                    <h3 class="card-title">Network Graph</h3>
+                    <h3 class="card-title">Network Graph <span id="network-node-count" style="font-weight: normal; color: var(--color-text-muted);"></span></h3>
                     <div class="quick-actions">
                         <button class="btn btn-sm btn-secondary" id="reset-zoom-btn">Reset Zoom</button>
                         <button class="btn btn-sm btn-secondary" id="refresh-network-btn">Refresh</button>
@@ -63,22 +70,55 @@ export class NetworkViz {
 
         // Setup buttons
         document.getElementById('reset-zoom-btn').addEventListener('click', () => this.resetZoom());
-        document.getElementById('refresh-network-btn').addEventListener('click', () => this.loadNetworkData());
+        document.getElementById('refresh-network-btn').addEventListener('click', () => this.refresh());
 
         // Initialize D3 visualization
         this.initD3();
 
-        // Load network data
-        await this.loadNetworkData();
-
         // Setup WebSocket listeners for live updates
-        this.ws.on('node_status', () => this.loadNetworkData());
-        this.ws.on('cluster_status', () => this.loadNetworkData());
+        this._setupWS();
+
+        // Load network data
+        await this._loadNetworkData();
+    }
+
+    _cleanupWS() {
+        for (const [evt, fn] of this._wsHandlers) {
+            this.ws.off(evt, fn);
+        }
+        this._wsHandlers = [];
+        if (this._loadTimer) {
+            clearTimeout(this._loadTimer);
+            this._loadTimer = null;
+        }
+    }
+
+    _setupWS() {
+        const handler = () => this._scheduleLoad();
+        this.ws.on('node_status', handler);
+        this.ws.on('cluster_status', handler);
+        this._wsHandlers = [
+            ['node_status', handler],
+            ['cluster_status', handler],
+        ];
+    }
+
+    _scheduleLoad() {
+        // Debounce rapid-fire updates (e.g., 30 nodes starting sends 30+ events)
+        if (this._loadTimer) clearTimeout(this._loadTimer);
+        this._loadTimer = setTimeout(() => this._loadNetworkData(), 500);
+    }
+
+    refresh() {
+        // Immediate refresh for user-initiated action
+        if (this._loadTimer) clearTimeout(this._loadTimer);
+        this._isLoading = false; // Allow immediate reload
+        this._loadNetworkData();
     }
 
     initD3() {
         const graphContainer = document.getElementById('network-graph');
-        const width = graphContainer.clientWidth;
+        const width = graphContainer.clientWidth || 800;
         const height = 600;
 
         // Create SVG
@@ -87,48 +127,86 @@ export class NetworkViz {
             .attr('width', width)
             .attr('height', height);
 
-        // Add zoom behavior
-        const zoom = d3.zoom()
+        // Store zoom behavior so resetZoom can reuse the same instance
+        this.zoom = d3.zoom()
             .scaleExtent([0.1, 4])
             .on('zoom', (event) => {
                 this.g.attr('transform', event.transform);
             });
 
-        this.svg.call(zoom);
+        this.svg.call(this.zoom);
 
         // Create container group
         this.g = this.svg.append('g');
 
         // Create force simulation
         this.simulation = d3.forceSimulation()
-            .force('link', d3.forceLink().id(d => d.id).distance(150))
-            .force('charge', d3.forceManyBody().strength(-400))
+            .force('link', d3.forceLink().id(d => d.id).distance(120))
+            .force('charge', d3.forceManyBody().strength(-300))
             .force('center', d3.forceCenter(width / 2, height / 2))
-            .force('collision', d3.forceCollide().radius(40));
+            .force('collision', d3.forceCollide().radius(35));
     }
 
-    async loadNetworkData() {
+    async _loadNetworkData() {
+        // Prevent concurrent loads from racing
+        if (this._isLoading) {
+            this._pendingLoad = true;
+            return;
+        }
+        this._isLoading = true;
+        this._pendingLoad = false;
+
         try {
-            // Try supervisor mode first: get all managed nodes
-            const managedNodes = await this.api.request('/nodes');
-            if (managedNodes && Array.isArray(managedNodes) && managedNodes.length > 0) {
-                this.isSupervisorMode = true;
-                this.buildSupervisorGraph(managedNodes);
-            } else {
-                // Fallback: single validator mode
-                this.isSupervisorMode = false;
-                await this.buildValidatorGraph();
+            let loaded = false;
+
+            // Try supervisor /nodes endpoint first
+            if (!loaded) {
+                try {
+                    const nodes = await this.api.request('/nodes');
+                    if (Array.isArray(nodes) && nodes.length > 0) {
+                        this.isSupervisorMode = true;
+                        this.buildSupervisorGraph(nodes);
+                        loaded = true;
+                    }
+                } catch (e) {
+                    // /nodes failed, continue to fallback
+                }
             }
 
-            this.renderGraph();
-        } catch (error) {
-            // Fallback to validator mode if supervisor endpoint fails
-            try {
-                this.isSupervisorMode = false;
-                await this.buildValidatorGraph();
+            // Fallback: /status endpoint (always available in supervisor, includes nodes)
+            if (!loaded) {
+                try {
+                    const status = await this.api.request('/status');
+                    if (status && Array.isArray(status.nodes) && status.nodes.length > 0) {
+                        this.isSupervisorMode = true;
+                        this.buildSupervisorGraph(status.nodes);
+                        loaded = true;
+                    }
+                } catch (e) {
+                    // Continue to validator fallback
+                }
+            }
+
+            // Final fallback: validator mode (single node + its peers)
+            if (!loaded) {
+                try {
+                    this.isSupervisorMode = false;
+                    await this.buildValidatorGraph();
+                    loaded = true;
+                } catch (e) {
+                    console.error('Failed to load network data:', e);
+                }
+            }
+
+            if (loaded) {
                 this.renderGraph();
-            } catch (e) {
-                console.error('Failed to load network data:', e);
+            }
+        } finally {
+            this._isLoading = false;
+            // If a load was requested while we were busy, schedule another
+            if (this._pendingLoad) {
+                this._pendingLoad = false;
+                this._scheduleLoad();
             }
         }
     }
@@ -153,22 +231,26 @@ export class NetworkViz {
             });
         });
 
-        // Build links: connect all running nodes to each other (P2P mesh)
-        const runningNodes = this.nodes.filter(n => n.isRunning);
-        for (let i = 0; i < runningNodes.length; i++) {
-            for (let j = i + 1; j < runningNodes.length; j++) {
-                this.links.push({
-                    source: runningNodes[i].id,
-                    target: runningNodes[j].id
-                });
-            }
+        // Build links: star topology with primary/bootstrap as hub
+        // This reflects the actual bootstrap connection pattern
+        const primary = this.nodes.find(n => n.isPrimary) || this.nodes.find(n => n.id === 'node0');
+        if (primary) {
+            this.nodes.forEach(node => {
+                if (node.id !== primary.id && (node.isRunning || node.isStarting)) {
+                    this.links.push({
+                        source: primary.id,
+                        target: node.id,
+                    });
+                }
+            });
         }
+
+        // Update node count display
+        this._updateNodeCount();
     }
 
     async buildValidatorGraph() {
         const stats = await this.api.getStats() || {};
-        this.currentNode = stats.node_id;
-
         const peersResponse = await this.api.getPeers() || {};
         const peersData = peersResponse.peers || [];
 
@@ -176,9 +258,10 @@ export class NetworkViz {
         this.links = [];
 
         // Add current node
+        const currentId = stats.node_id || 'node0';
         this.nodes.push({
-            id: stats.node_id || 'node0',
-            label: stats.node_id || 'node0',
+            id: currentId,
+            label: currentId,
             isPrimary: stats.is_primary || false,
             isRunning: true,
             isStarting: false,
@@ -189,9 +272,10 @@ export class NetworkViz {
 
         // Add peer nodes
         peersData.forEach(peer => {
+            const peerId = peer.id;
             this.nodes.push({
-                id: peer.id,
-                label: peer.id.substring(peer.id.length - 8),
+                id: peerId,
+                label: peerId.length > 12 ? peerId.substring(peerId.length - 8) : peerId,
                 isPrimary: false,
                 isRunning: true,
                 isStarting: false,
@@ -201,10 +285,25 @@ export class NetworkViz {
             });
 
             this.links.push({
-                source: stats.node_id || 'node0',
-                target: peer.id
+                source: currentId,
+                target: peerId
             });
         });
+
+        this._updateNodeCount();
+    }
+
+    _updateNodeCount() {
+        const countEl = document.getElementById('network-node-count');
+        if (!countEl) return;
+
+        const running = this.nodes.filter(n => n.isRunning).length;
+        const total = this.nodes.length;
+        if (total === 0) {
+            countEl.textContent = '';
+        } else {
+            countEl.textContent = `(${running}/${total} running)`;
+        }
     }
 
     getNodeColor(d) {
@@ -221,7 +320,18 @@ export class NetworkViz {
         // Clear existing elements
         this.g.selectAll('*').remove();
 
-        if (this.nodes.length === 0) return;
+        if (this.nodes.length === 0) {
+            const graphContainer = document.getElementById('network-graph');
+            const width = (graphContainer?.clientWidth || 800);
+            this.g.append('text')
+                .attr('x', width / 2)
+                .attr('y', 300)
+                .attr('text-anchor', 'middle')
+                .attr('fill', 'var(--color-text-muted)')
+                .attr('font-size', '14px')
+                .text('No nodes available. Start a cluster to see the network graph.');
+            return;
+        }
 
         // Create links
         const link = this.g.append('g')
@@ -305,24 +415,16 @@ export class NetworkViz {
     }
 
     resetZoom() {
-        if (!this.svg) return;
-
-        const graphContainer = document.getElementById('network-graph');
-        const width = graphContainer.clientWidth;
-        const height = 600;
+        if (!this.svg || !this.zoom) return;
 
         this.svg.transition()
             .duration(750)
-            .call(d3.zoom().transform, d3.zoomIdentity);
-
-        // Recenter simulation
-        this.simulation.force('center', d3.forceCenter(width / 2, height / 2));
-        this.simulation.alpha(0.3).restart();
+            .call(this.zoom.transform, d3.zoomIdentity);
     }
 
     handleWSEvent(event) {
         if (event.type === 'node_status' || event.type === 'cluster_status') {
-            this.loadNetworkData();
+            this._scheduleLoad();
         }
     }
 }
