@@ -9,6 +9,7 @@ export class NetworkViz {
         this.svg = null;
         this.g = null;
         this.currentNode = null;
+        this.isSupervisorMode = false;
     }
 
     async render(container) {
@@ -44,16 +45,16 @@ export class NetworkViz {
                             <span>Primary Node</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#6B7280"/></svg>
-                            <span>Replica Node</span>
+                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#10B981"/></svg>
+                            <span>Running Replica</span>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#F59E0B"/></svg>
+                            <span>Starting Node</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: 0.5rem;">
                             <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#DC2626"/></svg>
-                            <span>Byzantine Node</span>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <svg width="20" height="20"><circle cx="10" cy="10" r="10" fill="none" stroke="#10B981" stroke-width="2"/></svg>
-                            <span>Current Node</span>
+                            <span>Error / Stopped</span>
                         </div>
                     </div>
                 </div>
@@ -70,9 +71,9 @@ export class NetworkViz {
         // Load network data
         await this.loadNetworkData();
 
-        // Setup WebSocket listeners
-        this.ws.on('peer_connected', () => this.loadNetworkData());
-        this.ws.on('peer_disconnected', () => this.loadNetworkData());
+        // Setup WebSocket listeners for live updates
+        this.ws.on('node_status', () => this.loadNetworkData());
+        this.ws.on('cluster_status', () => this.loadNetworkData());
     }
 
     initD3() {
@@ -108,26 +109,69 @@ export class NetworkViz {
 
     async loadNetworkData() {
         try {
-            // Get current node stats (api.js already unwraps {success, data} envelope)
-            const stats = await this.api.getStats() || {};
-            this.currentNode = stats.node_id;
+            // Try supervisor mode first: get all managed nodes
+            const managedNodes = await this.api.request('/nodes');
+            if (managedNodes && Array.isArray(managedNodes) && managedNodes.length > 0) {
+                this.isSupervisorMode = true;
+                this.buildSupervisorGraph(managedNodes);
+            } else {
+                // Fallback: single validator mode
+                this.isSupervisorMode = false;
+                await this.buildValidatorGraph();
+            }
 
-            // Get peers (api.js already unwraps; validator returns {peers: [...]})
-            const peersResponse = await this.api.getPeers() || {};
-            const peersData = peersResponse.peers || [];
-
-            // Build graph data
-            this.buildGraphData(stats, peersData);
-
-            // Render graph
             this.renderGraph();
         } catch (error) {
-            console.error('Failed to load network data:', error);
+            // Fallback to validator mode if supervisor endpoint fails
+            try {
+                this.isSupervisorMode = false;
+                await this.buildValidatorGraph();
+                this.renderGraph();
+            } catch (e) {
+                console.error('Failed to load network data:', e);
+            }
         }
     }
 
-    buildGraphData(stats, peers) {
-        // Create nodes array
+    buildSupervisorGraph(managedNodes) {
+        this.nodes = [];
+        this.links = [];
+
+        // Add all managed nodes
+        managedNodes.forEach(node => {
+            this.nodes.push({
+                id: node.id,
+                label: node.id,
+                isPrimary: node.is_primary || false,
+                isRunning: node.status === 'running',
+                isStarting: node.status === 'starting',
+                isError: node.status === 'error',
+                isStopped: node.status === 'stopped',
+                status: node.status,
+                port: node.port,
+                apiPort: node.api_port
+            });
+        });
+
+        // Build links: connect all running nodes to each other (P2P mesh)
+        const runningNodes = this.nodes.filter(n => n.isRunning);
+        for (let i = 0; i < runningNodes.length; i++) {
+            for (let j = i + 1; j < runningNodes.length; j++) {
+                this.links.push({
+                    source: runningNodes[i].id,
+                    target: runningNodes[j].id
+                });
+            }
+        }
+    }
+
+    async buildValidatorGraph() {
+        const stats = await this.api.getStats() || {};
+        this.currentNode = stats.node_id;
+
+        const peersResponse = await this.api.getPeers() || {};
+        const peersData = peersResponse.peers || [];
+
         this.nodes = [];
         this.links = [];
 
@@ -136,26 +180,39 @@ export class NetworkViz {
             id: stats.node_id || 'node0',
             label: stats.node_id || 'node0',
             isPrimary: stats.is_primary || false,
-            isCurrent: true,
-            isByzantine: false
+            isRunning: true,
+            isStarting: false,
+            isError: false,
+            isStopped: false,
+            status: 'running'
         });
 
         // Add peer nodes
-        peers.forEach(peer => {
+        peersData.forEach(peer => {
             this.nodes.push({
                 id: peer.id,
-                label: peer.id.substring(peer.id.length - 8), // Show last 8 chars
+                label: peer.id.substring(peer.id.length - 8),
                 isPrimary: false,
-                isCurrent: false,
-                isByzantine: false // TODO: Detect Byzantine nodes
+                isRunning: true,
+                isStarting: false,
+                isError: false,
+                isStopped: false,
+                status: 'running'
             });
 
-            // Create link from current node to this peer
             this.links.push({
                 source: stats.node_id || 'node0',
                 target: peer.id
             });
         });
+    }
+
+    getNodeColor(d) {
+        if (d.isError || d.isStopped) return '#DC2626';
+        if (d.isStarting) return '#F59E0B';
+        if (d.isPrimary) return '#3B82F6';
+        if (d.isRunning) return '#10B981';
+        return '#6B7280';
     }
 
     renderGraph() {
@@ -164,14 +221,16 @@ export class NetworkViz {
         // Clear existing elements
         this.g.selectAll('*').remove();
 
+        if (this.nodes.length === 0) return;
+
         // Create links
         const link = this.g.append('g')
             .selectAll('line')
             .data(this.links)
             .enter().append('line')
             .attr('stroke', '#999')
-            .attr('stroke-opacity', 0.6)
-            .attr('stroke-width', 2);
+            .attr('stroke-opacity', 0.4)
+            .attr('stroke-width', 1.5);
 
         // Create node groups
         const node = this.g.append('g')
@@ -185,14 +244,10 @@ export class NetworkViz {
 
         // Add circles for nodes
         node.append('circle')
-            .attr('r', d => d.isCurrent ? 20 : 16)
-            .attr('fill', d => {
-                if (d.isByzantine) return '#DC2626';
-                if (d.isPrimary) return '#3B82F6';
-                return '#6B7280';
-            })
-            .attr('stroke', d => d.isCurrent ? '#10B981' : 'none')
-            .attr('stroke-width', d => d.isCurrent ? 3 : 0);
+            .attr('r', d => d.isPrimary ? 20 : 16)
+            .attr('fill', d => this.getNodeColor(d))
+            .attr('stroke', d => d.isPrimary ? '#1D4ED8' : 'none')
+            .attr('stroke-width', d => d.isPrimary ? 3 : 0);
 
         // Add labels
         node.append('text')
@@ -205,7 +260,12 @@ export class NetworkViz {
 
         // Add tooltips
         node.append('title')
-            .text(d => `${d.id}\nRole: ${d.isPrimary ? 'Primary' : 'Replica'}`);
+            .text(d => {
+                let tip = `${d.id}\nRole: ${d.isPrimary ? 'Primary' : 'Replica'}\nStatus: ${d.status}`;
+                if (d.port) tip += `\nP2P Port: ${d.port}`;
+                if (d.apiPort) tip += `\nAPI Port: ${d.apiPort}`;
+                return tip;
+            });
 
         // Update simulation
         this.simulation
@@ -261,9 +321,8 @@ export class NetworkViz {
     }
 
     handleWSEvent(event) {
-        if (event.type === 'peer_connected' || event.type === 'peer_disconnected') {
+        if (event.type === 'node_status' || event.type === 'cluster_status') {
             this.loadNetworkData();
         }
     }
 }
-
