@@ -138,8 +138,17 @@ func (m *NodeManager) StartNode(nodeID string, isPrimary bool, isBootstrap bool,
 
 	// Check if node already exists and is running
 	if existing, ok := m.nodes[nodeID]; ok {
-		if existing.Status == NodeStatusRunning || existing.Status == NodeStatusStarting {
-			return fmt.Errorf("node %s is already running", nodeID)
+		existing.mu.RLock()
+		status := existing.Status
+		existing.mu.RUnlock()
+
+		if status == NodeStatusRunning || status == NodeStatusStarting {
+			return fmt.Errorf("node %s is already running (status: %s)", nodeID, status)
+		}
+		// If node is stopped or error state, we'll restart it by removing and recreating
+		if status == NodeStatusStopped || status == NodeStatusError {
+			// Clean up the old node entry
+			delete(m.nodes, nodeID)
 		}
 	}
 
@@ -402,6 +411,18 @@ func (m *NodeManager) StartCluster(nodeCount int) error {
 	if nodeCount < 1 {
 		return fmt.Errorf("node count must be at least 1")
 	}
+
+	// Stop any existing nodes first to ensure clean state
+	m.StopAllNodes()
+
+	// Wait for nodes to fully stop
+	time.Sleep(1 * time.Second)
+
+	// Clear the nodes map to start fresh
+	m.mu.Lock()
+	m.nodes = make(map[string]*ManagedNode)
+	m.totalNodes = 0
+	m.mu.Unlock()
 
 	// Start bootstrap node first
 	bootstrapID := "node0"
