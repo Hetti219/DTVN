@@ -108,14 +108,13 @@ export class NetworkViz {
 
     async loadNetworkData() {
         try {
-            // Get current node stats
-            const statsResponse = await this.api.getStats();
-            const stats = statsResponse.success ? statsResponse.data : {};
+            // Get current node stats (api.js already unwraps {success, data} envelope)
+            const stats = await this.api.getStats() || {};
             this.currentNode = stats.node_id;
 
-            // Get peers
-            const peersResponse = await this.api.getPeers();
-            const peersData = peersResponse.success && peersResponse.data ? peersResponse.data.peers : [];
+            // Get peers (api.js already unwraps; validator returns {peers: [...]})
+            const peersResponse = await this.api.getPeers() || {};
+            const peersData = peersResponse.peers || [];
 
             // Build graph data
             this.buildGraphData(stats, peersData);

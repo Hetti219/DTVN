@@ -121,16 +121,16 @@ export class Dashboard {
 
     async loadData() {
         try {
-            // Fetch stats
-            const statsResponse = await this.api.getStats();
-            if (statsResponse.success && statsResponse.data) {
-                this.updateStats(statsResponse.data);
+            // Fetch stats (api.js already unwraps {success, data} envelope)
+            const stats = await this.api.getStats();
+            if (stats) {
+                this.updateStats(stats);
             }
 
-            // Fetch tickets
-            const ticketsResponse = await this.api.getAllTickets();
-            if (ticketsResponse.success && ticketsResponse.data) {
-                this.updateRecentActivity(ticketsResponse.data);
+            // Fetch tickets (api.js already unwraps {success, data} envelope)
+            const tickets = await this.api.getAllTickets();
+            if (tickets) {
+                this.updateRecentActivity(Array.isArray(tickets) ? tickets : []);
             }
         } catch (error) {
             console.error('Failed to load dashboard data:', error);
