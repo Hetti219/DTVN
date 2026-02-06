@@ -145,7 +145,7 @@ export class NodeManager {
 
     setupWSHandlers() {
         this.ws.on('node_status', (data) => {
-            this.updateNodeStatus(data.node_id, data.status);
+            this.updateNodeStatus(data.node_id, data.status, data.node);
         });
 
         this.ws.on('node_output', (data) => {
@@ -153,6 +153,26 @@ export class NodeManager {
                 this.appendLog(data.line);
             }
         });
+
+        this.ws.on('cluster_status', (data) => {
+            this.handleClusterStatus(data);
+        });
+    }
+
+    handleClusterStatus(data) {
+        const startBtn = document.getElementById('start-cluster-btn');
+        if (startBtn) {
+            if (data.status === 'starting') {
+                startBtn.disabled = true;
+                startBtn.textContent = `Starting... (${data.nodes_started}/${data.nodes_total})`;
+            } else {
+                startBtn.disabled = false;
+                startBtn.textContent = 'Start Cluster';
+                if (data.status === 'running') {
+                    window.app.showToast(`Cluster ready: ${data.nodes_total} nodes started`, 'success');
+                }
+            }
+        }
     }
 
     async checkSupervisorMode() {
@@ -272,24 +292,28 @@ export class NodeManager {
         `).join('');
     }
 
-    updateNodeStatus(nodeId, status) {
-        const nodeCard = document.querySelector(`.node-card[data-node-id="${nodeId}"]`);
-        if (nodeCard) {
-            nodeCard.className = `node-card ${status}`;
-            const statusSpan = nodeCard.querySelector('.node-status');
-            if (statusSpan) {
-                statusSpan.className = `node-status status-${status}`;
-                statusSpan.textContent = status;
-            }
-        }
-
-        // Update nodes array
-        const node = this.nodes.find(n => n.id === nodeId);
+    updateNodeStatus(nodeId, status, nodeInfo) {
+        // Update or add to nodes array
+        let node = this.nodes.find(n => n.id === nodeId);
         if (node) {
             node.status = status;
+        } else if (nodeInfo) {
+            // New node we don't know about yet - add it from the WebSocket payload
+            this.nodes.push({
+                id: nodeInfo.id || nodeId,
+                port: nodeInfo.port,
+                api_port: nodeInfo.api_port,
+                status: status,
+                is_primary: nodeInfo.is_primary,
+                is_bootstrap: nodeInfo.is_bootstrap,
+                error: nodeInfo.error
+            });
+        } else {
+            // Minimal fallback - add with just id and status
+            this.nodes.push({ id: nodeId, status: status });
         }
 
-        // Re-render to update action buttons
+        // Re-render to update cards and action buttons
         this.renderNodeList();
     }
 
@@ -402,28 +426,31 @@ export class NodeManager {
             return;
         }
 
+        const startBtn = document.getElementById('start-cluster-btn');
+        if (startBtn) {
+            startBtn.disabled = true;
+            startBtn.textContent = 'Starting...';
+        }
+
+        // Clear current nodes display for fresh start
+        this.nodes = [];
+        this.renderNodeList();
+
         try {
+            // This returns immediately - nodes start in the background.
+            // Progress updates arrive via WebSocket cluster_status and node_status events.
             await this.api.request('/cluster/start', {
                 method: 'POST',
                 body: JSON.stringify({ node_count: nodeCount })
             });
 
             window.app.showToast(`Starting cluster with ${nodeCount} nodes...`, 'success');
-
-            // Poll for node status updates
-            const checkInterval = setInterval(async () => {
-                await this.loadNodes();
-                const runningCount = this.nodes.filter(n => n.status === 'running').length;
-                if (runningCount >= nodeCount) {
-                    clearInterval(checkInterval);
-                    window.app.showToast(`Cluster started: ${runningCount} nodes running`, 'success');
-                }
-            }, 2000);
-
-            // Stop polling after 60 seconds
-            setTimeout(() => clearInterval(checkInterval), 60000);
         } catch (err) {
             window.app.showToast(`Failed to start cluster: ${err.message}`, 'error');
+            if (startBtn) {
+                startBtn.disabled = false;
+                startBtn.textContent = 'Start Cluster';
+            }
         }
     }
 
@@ -503,9 +530,11 @@ export class NodeManager {
 
     handleWSEvent(event) {
         if (event.type === 'node_status') {
-            this.updateNodeStatus(event.node_id, event.status);
+            this.updateNodeStatus(event.node_id, event.status, event.node);
         } else if (event.type === 'node_output' && this.selectedNodeId === event.node_id) {
             this.appendLog(event.line);
+        } else if (event.type === 'cluster_status') {
+            this.handleClusterStatus(event);
         }
     }
 }
