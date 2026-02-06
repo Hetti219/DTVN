@@ -946,11 +946,37 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 	primary := n.pbftNode.GetPrimary()
 	fmt.Printf("Node %s: 📤 Forwarding validation request for ticket %s to primary %s\n", n.nodeID, ticketID, primary)
 
-	// Check if we have any peers to forward to
-	peerCount := n.p2pHost.GetPeerCount()
-	if peerCount == 0 {
-		return fmt.Errorf("no peers connected, cannot forward request to primary %s", primary)
+	// Wait for peers to connect (with retry)
+	// This handles the race condition where API starts before peer discovery completes
+	maxRetries := 5
+	retryDelay := 1 * time.Second
+	var peerCount int
+
+	for i := 0; i < maxRetries; i++ {
+		peerCount = n.p2pHost.GetPeerCount()
+		if peerCount > 0 {
+			break
+		}
+
+		if i == 0 {
+			fmt.Printf("Node %s: ⏳ Waiting for peer connections (attempt %d/%d)...\n", n.nodeID, i+1, maxRetries)
+		} else {
+			fmt.Printf("Node %s: ⏳ Retrying... (attempt %d/%d)\n", n.nodeID, i+1, maxRetries)
+		}
+
+		select {
+		case <-time.After(retryDelay):
+			continue
+		case <-n.ctx.Done():
+			return fmt.Errorf("node shutting down")
+		}
 	}
+
+	if peerCount == 0 {
+		return fmt.Errorf("no peers connected after %d attempts, cannot forward request to primary %s. Please wait for peer discovery to complete", maxRetries, primary)
+	}
+
+	fmt.Printf("Node %s: ✅ Connected to %d peer(s), forwarding request\n", n.nodeID, peerCount)
 
 	// Serialize the request
 	payload, err := consensus.SerializeRequest(req)
