@@ -180,6 +180,13 @@ func (sm *StateMachine) ConsumeTicket(ticketID string, validatorID string) error
 		}
 	}
 
+	// Publish state update via gossip
+	if sm.publishUpdate != nil {
+		if err := sm.publishUpdate(ticketID, StateConsumed, validatorID, ticket.Timestamp); err != nil {
+			fmt.Printf("Warning: Failed to publish consume update (will retry via anti-entropy): %v\n", err)
+		}
+	}
+
 	return nil
 }
 
