@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -74,6 +75,64 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, endpoint s
 	io.Copy(w, resp.Body)
 }
 
+// proxyTicketRequest proxies a ticket mutation request and broadcasts a WebSocket event on success
+func (s *Server) proxyTicketRequest(w http.ResponseWriter, r *http.Request, endpoint string, eventType string) {
+	nodeURL, err := s.getRunningNodeURL()
+	if err != nil {
+		s.writeError(w, http.StatusServiceUnavailable, "No running nodes available. Start a cluster first.")
+		return
+	}
+
+	// Read body to extract ticket_id for the WebSocket event
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, "Failed to read request body")
+		return
+	}
+
+	var reqBody struct {
+		TicketID string `json:"ticket_id"`
+	}
+	json.Unmarshal(bodyBytes, &reqBody)
+
+	// Proxy the request
+	targetURL := fmt.Sprintf("%s/api/v1%s", nodeURL, endpoint)
+	proxyReq, err := http.NewRequest(r.Method, targetURL, bytes.NewReader(bodyBytes))
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Failed to create proxy request")
+		return
+	}
+	proxyReq.Header = r.Header.Clone()
+
+	client := &http.Client{}
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to connect to validator node: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	// Copy response headers
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+
+	// Copy status code and body
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+
+	// Broadcast WebSocket event on success
+	if resp.StatusCode == http.StatusOK {
+		s.broadcastWSMessage(map[string]interface{}{
+			"type":      eventType,
+			"ticket_id": reqBody.TicketID,
+			"timestamp": time.Now().Unix(),
+		})
+	}
+}
+
 // Ticket proxy handlers
 
 func (s *Server) handleProxyGetAllTickets(w http.ResponseWriter, r *http.Request) {
@@ -81,15 +140,15 @@ func (s *Server) handleProxyGetAllTickets(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleProxyValidateTicket(w http.ResponseWriter, r *http.Request) {
-	s.proxyRequest(w, r, "/tickets/validate")
+	s.proxyTicketRequest(w, r, "/tickets/validate", "ticket_validated")
 }
 
 func (s *Server) handleProxyConsumeTicket(w http.ResponseWriter, r *http.Request) {
-	s.proxyRequest(w, r, "/tickets/consume")
+	s.proxyTicketRequest(w, r, "/tickets/consume", "ticket_consumed")
 }
 
 func (s *Server) handleProxyDisputeTicket(w http.ResponseWriter, r *http.Request) {
-	s.proxyRequest(w, r, "/tickets/dispute")
+	s.proxyTicketRequest(w, r, "/tickets/dispute", "ticket_disputed")
 }
 
 func (s *Server) handleProxyGetTicket(w http.ResponseWriter, r *http.Request) {
