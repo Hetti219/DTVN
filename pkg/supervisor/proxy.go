@@ -11,14 +11,25 @@ import (
 	"github.com/gorilla/mux"
 )
 
-// getRunningNodeURL returns the API URL of the first running node
+// getRunningNodeURL returns the API URL of a running node, preferring the primary.
+// This avoids the non-primary forwarding path which requires peer discovery to be complete.
 func (s *Server) getRunningNodeURL() (string, error) {
 	nodes := s.nodeManager.GetAllNodes()
 
+	var fallbackURL string
 	for _, node := range nodes {
 		if node.Status == NodeStatusRunning {
-			return fmt.Sprintf("http://127.0.0.1:%d", node.APIPort), nil
+			if node.IsPrimary {
+				return fmt.Sprintf("http://127.0.0.1:%d", node.APIPort), nil
+			}
+			if fallbackURL == "" {
+				fallbackURL = fmt.Sprintf("http://127.0.0.1:%d", node.APIPort)
+			}
 		}
+	}
+
+	if fallbackURL != "" {
+		return fallbackURL, nil
 	}
 
 	return "", fmt.Errorf("no running nodes available")
