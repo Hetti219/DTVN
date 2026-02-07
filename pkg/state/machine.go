@@ -227,6 +227,13 @@ func (sm *StateMachine) DisputeTicket(ticketID string, validatorID string) error
 		}
 	}
 
+	// Publish state update via gossip
+	if sm.publishUpdate != nil {
+		if err := sm.publishUpdate(ticketID, StateDisputed, validatorID, ticket.Timestamp); err != nil {
+			fmt.Printf("Warning: Failed to publish dispute update (will retry via anti-entropy): %v\n", err)
+		}
+	}
+
 	return nil
 }
 
