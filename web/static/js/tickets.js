@@ -109,8 +109,8 @@ export class TicketManager {
         try {
             resultDiv.innerHTML = '<div class="alert alert-info">Validating ticket...</div>';
 
-            const dataBytes = data ? new TextEncoder().encode(JSON.stringify(data)) : null;
-            await this.api.validateTicket(ticketID, dataBytes);
+            const dataBase64 = data ? btoa(JSON.stringify(data)) : null;
+            await this.api.validateTicket(ticketID, dataBase64);
 
             // If we get here, validation succeeded (no exception thrown)
             resultDiv.innerHTML = '<div class="alert alert-success">Ticket validated successfully!</div>';
