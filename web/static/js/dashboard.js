@@ -5,6 +5,7 @@ export class Dashboard {
         this.ws = ws;
         this.stats = null;
         this.recentTickets = [];
+        this.wsListenersRegistered = false;
     }
 
     async render(container) {
@@ -112,11 +113,14 @@ export class Dashboard {
         // Load initial data
         await this.loadData();
 
-        // Setup WebSocket listeners
-        this.ws.on('ticket_validated', () => this.loadData());
-        this.ws.on('ticket_consumed', () => this.loadData());
-        this.ws.on('ticket_disputed', () => this.loadData());
-        this.ws.on('stats_update', (data) => this.updateStats(data.stats));
+        // Setup WebSocket listeners (only once to prevent accumulation on re-render)
+        if (!this.wsListenersRegistered) {
+            this.ws.on('ticket_validated', () => this.loadData());
+            this.ws.on('ticket_consumed', () => this.loadData());
+            this.ws.on('ticket_disputed', () => this.loadData());
+            this.ws.on('stats_update', (data) => this.updateStats(data.stats));
+            this.wsListenersRegistered = true;
+        }
     }
 
     async loadData() {
