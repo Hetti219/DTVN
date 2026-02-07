@@ -94,20 +94,20 @@ export class API {
 
     // Node management (supervisor APIs)
     async startNode(config) {
-        return this.request('/nodes/start', {
+        return this.request('/nodes', {
             method: 'POST',
             body: JSON.stringify(config),
         });
     }
 
     async stopNode(nodeID) {
-        return this.request(`/nodes/stop/${nodeID}`, {
-            method: 'POST',
+        return this.request(`/nodes/${nodeID}`, {
+            method: 'DELETE',
         });
     }
 
     async getNodeList() {
-        return this.request('/nodes/list');
+        return this.request('/nodes');
     }
 
     async getNodeLogs(nodeID, lines = 100) {
@@ -122,17 +122,13 @@ export class API {
         });
     }
 
-    async stopSimulation(simID) {
-        return this.request(`/simulator/stop/${simID}`, {
+    async stopSimulation() {
+        return this.request('/simulator/stop', {
             method: 'POST',
         });
     }
 
-    async getSimulationStatus(simID) {
-        return this.request(`/simulator/status/${simID}`);
-    }
-
-    async getSimulationList() {
-        return this.request('/simulator/list');
+    async getSimulationStatus() {
+        return this.request('/simulator');
     }
 }
