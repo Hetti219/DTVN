@@ -6,6 +6,7 @@ export class TicketManager {
         this.tickets = [];
         this.filterState = 'all';
         this.searchQuery = '';
+        this.wsListenersRegistered = false;
     }
 
     async render(container) {
@@ -84,10 +85,13 @@ export class TicketManager {
         // Load tickets
         await this.loadTickets();
 
-        // Setup WebSocket listeners
-        this.ws.on('ticket_validated', () => this.loadTickets());
-        this.ws.on('ticket_consumed', () => this.loadTickets());
-        this.ws.on('ticket_disputed', () => this.loadTickets());
+        // Setup WebSocket listeners (only once to prevent accumulation on re-render)
+        if (!this.wsListenersRegistered) {
+            this.ws.on('ticket_validated', () => this.loadTickets());
+            this.ws.on('ticket_consumed', () => this.loadTickets());
+            this.ws.on('ticket_disputed', () => this.loadTickets());
+            this.wsListenersRegistered = true;
+        }
     }
 
     async handleValidateTicket() {
