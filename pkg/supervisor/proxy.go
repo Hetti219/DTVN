@@ -12,27 +12,55 @@ import (
 )
 
 // getRunningNodeURL returns the API URL of a running node, preferring the primary.
-// This avoids the non-primary forwarding path which requires peer discovery to be complete.
+// It verifies the node's API is actually reachable before returning, since a node's
+// status is set to "running" as soon as the OS process starts, before the API server
+// is listening.
 func (s *Server) getRunningNodeURL() (string, error) {
 	nodes := s.nodeManager.GetAllNodes()
 
+	var primaryURL string
 	var fallbackURL string
+	hasRunningNodes := false
+
 	for _, node := range nodes {
 		if node.Status == NodeStatusRunning {
-			if node.IsPrimary {
-				return fmt.Sprintf("http://127.0.0.1:%d", node.APIPort), nil
+			hasRunningNodes = true
+			url := fmt.Sprintf("http://127.0.0.1:%d", node.APIPort)
+
+			if !s.isNodeReachable(url) {
+				continue
 			}
-			if fallbackURL == "" {
-				fallbackURL = fmt.Sprintf("http://127.0.0.1:%d", node.APIPort)
+
+			if node.IsPrimary {
+				primaryURL = url
+			} else if fallbackURL == "" {
+				fallbackURL = url
 			}
 		}
 	}
 
+	if primaryURL != "" {
+		return primaryURL, nil
+	}
 	if fallbackURL != "" {
 		return fallbackURL, nil
 	}
 
+	if hasRunningNodes {
+		return "", fmt.Errorf("nodes are still starting up, please try again in a few seconds")
+	}
 	return "", fmt.Errorf("no running nodes available")
+}
+
+// isNodeReachable checks if a node's API server is actually listening
+func (s *Server) isNodeReachable(baseURL string) bool {
+	client := &http.Client{Timeout: 500 * time.Millisecond}
+	resp, err := client.Get(baseURL + "/health")
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // proxyRequest forwards a request to a running validator node
