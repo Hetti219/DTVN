@@ -30,6 +30,7 @@ type ValidatorInterface interface {
 	ValidateTicket(ticketID string, data []byte) error
 	ConsumeTicket(ticketID string) error
 	DisputeTicket(ticketID string) error
+	SeedTickets() (int, error)
 	GetTicket(ticketID string) (interface{}, error)
 	GetAllTickets() ([]interface{}, error)
 	GetStats() map[string]interface{}
@@ -109,6 +110,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/tickets/validate", s.handleValidateTicket).Methods("POST")
 	api.HandleFunc("/tickets/consume", s.handleConsumeTicket).Methods("POST")
 	api.HandleFunc("/tickets/dispute", s.handleDisputeTicket).Methods("POST")
+	api.HandleFunc("/tickets/seed", s.handleSeedTickets).Methods("POST")
 	api.HandleFunc("/tickets/{id}", s.handleGetTicket).Methods("GET")
 	api.HandleFunc("/tickets", s.handleGetAllTickets).Methods("GET")
 
@@ -233,6 +235,22 @@ func (s *Server) handleDisputeTicket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.sendSuccess(w, "Ticket disputed successfully", nil)
+}
+
+func (s *Server) handleSeedTickets(w http.ResponseWriter, r *http.Request) {
+	seeded, err := s.validator.SeedTickets()
+	if err != nil {
+		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to seed tickets: %v", err))
+		return
+	}
+
+	s.broadcast <- map[string]interface{}{
+		"type":      "tickets_seeded",
+		"count":     seeded,
+		"timestamp": time.Now().Unix(),
+	}
+
+	s.sendSuccess(w, fmt.Sprintf("Seeded %d tickets", seeded), map[string]int{"seeded": seeded})
 }
 
 func (s *Server) handleGetTicket(w http.ResponseWriter, r *http.Request) {

@@ -62,38 +62,80 @@ func NewStateMachine(nodeID string) *StateMachine {
 	}
 }
 
-// ValidateTicket validates a ticket and transitions it to VALIDATED state
+// IssueTicket creates a new ticket in ISSUED state (pre-event setup).
+// This represents a ticket that has been sold/purchased and is awaiting validation at the gate.
+func (sm *StateMachine) IssueTicket(ticketID string, data []byte) error {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	if _, exists := sm.currentState[ticketID]; exists {
+		return fmt.Errorf("ticket %s already exists", ticketID)
+	}
+
+	ticket := &Ticket{
+		ID:          ticketID,
+		State:       StateIssued,
+		Data:        data,
+		ValidatorID: "",
+		Timestamp:   time.Now().Unix(),
+		VectorClock: sm.vectorClock.Copy(),
+		Metadata:    make(map[string]string),
+	}
+	sm.currentState[ticketID] = ticket
+
+	return nil
+}
+
+// SeedTickets bulk-loads tickets in ISSUED state, skipping any that already exist.
+// Returns the number of newly seeded tickets.
+func (sm *StateMachine) SeedTickets(tickets []*Ticket) (int, error) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+
+	seeded := 0
+	for _, t := range tickets {
+		if _, exists := sm.currentState[t.ID]; exists {
+			continue
+		}
+		sm.currentState[t.ID] = &Ticket{
+			ID:          t.ID,
+			State:       StateIssued,
+			Data:        t.Data,
+			ValidatorID: "",
+			Timestamp:   t.Timestamp,
+			VectorClock: sm.vectorClock.Copy(),
+			Metadata:    copyMetadata(t.Metadata),
+		}
+		seeded++
+	}
+
+	return seeded, nil
+}
+
+// ValidateTicket validates a ticket and transitions it from ISSUED to VALIDATED state.
+// The ticket must already exist (i.e., it was issued/sold before the event).
 func (sm *StateMachine) ValidateTicket(ticketID string, validatorID string, data []byte) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
-	// Check if ticket exists
+	// Ticket must exist — it should have been issued (sold) before validation
 	ticket, exists := sm.currentState[ticketID]
 	if !exists {
-		// Create new ticket in PENDING state
-		ticket = &Ticket{
-			ID:          ticketID,
-			State:       StatePending,
-			Data:        data,
-			ValidatorID: validatorID,
-			Timestamp:   time.Now().Unix(),
-			VectorClock: sm.vectorClock.Copy(),
-			Metadata:    make(map[string]string),
-		}
-		sm.currentState[ticketID] = ticket
+		return fmt.Errorf("ticket %s not found — ticket must be issued before validation", ticketID)
 	}
 
-	// Check if ticket is already validated (prevent duplicates)
+	// Only ISSUED tickets can be validated
 	if ticket.State == StateValidated {
 		return fmt.Errorf("ticket %s already validated", ticketID)
 	}
-
-	// Check if ticket is already consumed or disputed
 	if ticket.State == StateConsumed {
 		return fmt.Errorf("ticket %s already consumed", ticketID)
 	}
 	if ticket.State == StateDisputed {
 		return fmt.Errorf("ticket %s is disputed", ticketID)
+	}
+	if ticket.State != StateIssued {
+		return fmt.Errorf("ticket %s cannot be validated (current state: %s)", ticketID, ticket.State)
 	}
 
 	// Transition to VALIDATED

@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/Hetti219/DTVN/pkg/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // NodeStatus represents the status of a managed node
@@ -494,7 +497,21 @@ func (m *NodeManager) startClusterAsync(nodeCount int) {
 		return
 	}
 
-	bootstrapAddr := fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", bootstrapNode.Port)
+	// Derive the bootstrap node's deterministic peer ID so other nodes can connect.
+	// libp2p requires the peer ID in the multiaddr for dialing.
+	privKey, err := network.GenerateDeterministicKey(bootstrapID)
+	if err != nil {
+		m.notifyCluster(ClusterStatusIdle, 0, nodeCount)
+		fmt.Printf("Cluster: Failed to derive bootstrap peer ID: %v\n", err)
+		return
+	}
+	peerID, err := peer.IDFromPrivateKey(privKey)
+	if err != nil {
+		m.notifyCluster(ClusterStatusIdle, 0, nodeCount)
+		fmt.Printf("Cluster: Failed to derive bootstrap peer ID: %v\n", err)
+		return
+	}
+	bootstrapAddr := fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", bootstrapNode.Port, peerID)
 
 	// Start remaining nodes concurrently in batches
 	// Batch size limits concurrent process spawns to avoid resource contention

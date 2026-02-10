@@ -62,6 +62,12 @@ export class API {
         });
     }
 
+    async seedTickets() {
+        return this.request('/tickets/seed', {
+            method: 'POST',
+        });
+    }
+
     async getTicket(ticketID) {
         return this.request(`/tickets/${ticketID}`);
     }
