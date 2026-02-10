@@ -52,6 +52,33 @@ func (s *Server) getRunningNodeURL() (string, error) {
 	return "", fmt.Errorf("no running nodes available")
 }
 
+// getPrimaryNodeURL returns the API URL of the primary node only.
+// Ticket mutations must go through the primary for PBFT consensus.
+// Falling back to a non-primary would just cause a 5-second forwarding timeout.
+func (s *Server) getPrimaryNodeURL() (string, error) {
+	nodes := s.nodeManager.GetAllNodes()
+
+	hasPrimary := false
+	for _, node := range nodes {
+		if node.IsPrimary {
+			hasPrimary = true
+			if node.Status != NodeStatusRunning {
+				return "", fmt.Errorf("primary node is not running (status: %s). Start a cluster first", node.Status)
+			}
+			url := fmt.Sprintf("http://127.0.0.1:%d", node.APIPort)
+			if !s.isNodeReachable(url) {
+				return "", fmt.Errorf("primary node is still starting up, please try again in a few seconds")
+			}
+			return url, nil
+		}
+	}
+
+	if !hasPrimary {
+		return "", fmt.Errorf("no primary node found. Start a cluster first")
+	}
+	return "", fmt.Errorf("no running nodes available")
+}
+
 // isNodeReachable checks if a node's API server is actually listening
 func (s *Server) isNodeReachable(baseURL string) bool {
 	client := &http.Client{Timeout: 500 * time.Millisecond}
@@ -114,11 +141,12 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, endpoint s
 	io.Copy(w, resp.Body)
 }
 
-// proxyTicketRequest proxies a ticket mutation request and broadcasts a WebSocket event on success
+// proxyTicketRequest proxies a ticket mutation request to the primary node
+// and broadcasts a WebSocket event on success
 func (s *Server) proxyTicketRequest(w http.ResponseWriter, r *http.Request, endpoint string, eventType string) {
-	nodeURL, err := s.getRunningNodeURL()
+	nodeURL, err := s.getPrimaryNodeURL()
 	if err != nil {
-		s.writeError(w, http.StatusServiceUnavailable, "No running nodes available. Start a cluster first.")
+		s.writeError(w, http.StatusServiceUnavailable, err.Error())
 		return
 	}
 
