@@ -29,9 +29,7 @@ test-data/
 .DS_Store
 Thumbs.db
 
-# Documentation
-*.pdf
-distributed-ticket-validation-implementation.md
+
 
 # Logs
 *.log
