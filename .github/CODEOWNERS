@@ -1,0 +1,28 @@
+# CODEOWNERS - Defines code ownership for pull request reviews
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default: repository owner reviews all changes
+* @Hetti219
+
+# Core protocol implementations (consensus, gossip, state sync)
+/pkg/consensus/ @Hetti219
+/pkg/gossip/ @Hetti219
+/pkg/state/ @Hetti219
+/pkg/network/ @Hetti219
+
+# Storage layer
+/pkg/storage/ @Hetti219
+
+# API and supervisor (external interfaces)
+/pkg/api/ @Hetti219
+/pkg/supervisor/ @Hetti219
+
+# Protocol definitions
+/proto/ @Hetti219
+
+# CI/CD and infrastructure
+/.github/ @Hetti219
+/Makefile @Hetti219
+
+# Web dashboard
+/web/ @Hetti219
