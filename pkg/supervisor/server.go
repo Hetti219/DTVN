@@ -160,6 +160,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/tickets/validate", s.handleProxyValidateTicket).Methods("POST")
 	api.HandleFunc("/tickets/consume", s.handleProxyConsumeTicket).Methods("POST")
 	api.HandleFunc("/tickets/dispute", s.handleProxyDisputeTicket).Methods("POST")
+	api.HandleFunc("/tickets/seed", s.handleProxySeedTickets).Methods("POST")
 	api.HandleFunc("/tickets/{id}", s.handleProxyGetTicket).Methods("GET")
 
 	// Stats proxy endpoint
