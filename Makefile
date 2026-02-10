@@ -3,17 +3,20 @@
 # Variables
 BINARY_NAME=validator
 SIMULATOR_NAME=simulator
+SUPERVISOR_NAME=supervisor
 GO=go
 
 # Build all binaries
 all: build
 
-# Build validator and simulator
+# Build validator, simulator, and supervisor
 build:
 	@echo "Building validator..."
 	$(GO) build -o bin/$(BINARY_NAME) cmd/validator/main.go
 	@echo "Building simulator..."
 	$(GO) build -o bin/$(SIMULATOR_NAME) cmd/simulator/main.go
+	@echo "Building supervisor..."
+	$(GO) build -o bin/$(SUPERVISOR_NAME) cmd/supervisor/main.go
 	@echo "Build complete!"
 
 # Clean build artifacts
