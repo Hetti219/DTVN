@@ -892,15 +892,18 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 	if n.pbftNode.IsPrimary() {
 		fmt.Printf("Node %s: ✅ Received validation request for ticket %s (I am primary)\n", n.nodeID, ticketID)
 
-		// Check peer connectivity for multi-node setup
+		// Check peer connectivity for multi-node setup.
+		// PBFT requires 2f+1 votes where f = (n-1)/3. The primary counts as one
+		// of the 2f+1, so we need at least 2f peers to reach quorum.
 		peerCount := n.p2pHost.GetPeerCount()
-		expectedPeers := n.totalNodes - 1 // All nodes except self
+		f := (n.totalNodes - 1) / 3 // max Byzantine faults
+		minPeers := 2 * f           // minimum peers needed (quorum = 2f+1, minus self)
 
-		if expectedPeers > 0 && peerCount == 0 {
-			return fmt.Errorf("no peers connected, cannot reach consensus (expected %d peers)", expectedPeers)
+		if n.totalNodes > 1 && peerCount < minPeers {
+			return fmt.Errorf("not enough peers for consensus: have %d, need at least %d (quorum requires %d of %d nodes)", peerCount, minPeers, 2*f+1, n.totalNodes)
 		}
-		if peerCount < expectedPeers {
-			fmt.Printf("Node %s: ⚠️  WARNING - only %d/%d peers connected\n", n.nodeID, peerCount, expectedPeers)
+		if peerCount < n.totalNodes-1 {
+			fmt.Printf("Node %s: ⚠️  WARNING - only %d/%d peers connected (minimum %d for consensus)\n", n.nodeID, peerCount, n.totalNodes-1, minPeers)
 		}
 
 		// Create result channel for synchronous waiting
