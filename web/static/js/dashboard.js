@@ -64,7 +64,11 @@ export class Dashboard {
                             <span id="dash-total-tickets" class="stat-value">0</span>
                         </div>
                         <div class="stat">
-                            <span class="stat-label">Validated Tickets</span>
+                            <span class="stat-label">Issued (Awaiting Scan)</span>
+                            <span id="dash-issued-tickets" class="stat-value">0</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Validated</span>
                             <span id="dash-validated-tickets" class="stat-value">0</span>
                         </div>
                     </div>
@@ -118,6 +122,7 @@ export class Dashboard {
             this.ws.on('ticket_validated', () => this.loadData());
             this.ws.on('ticket_consumed', () => this.loadData());
             this.ws.on('ticket_disputed', () => this.loadData());
+            this.ws.on('tickets_seeded', () => this.loadData());
             this.ws.on('stats_update', (data) => this.updateStats(data.stats));
             this.wsListenersRegistered = true;
         }
@@ -181,12 +186,10 @@ export class Dashboard {
             return;
         }
 
-        // Update total tickets count
+        // Update ticket counts
         document.getElementById('dash-total-tickets').textContent = tickets.length;
-
-        // Count validated tickets
-        const validatedCount = tickets.filter(t => t.State === 'VALIDATED').length;
-        document.getElementById('dash-validated-tickets').textContent = validatedCount;
+        document.getElementById('dash-issued-tickets').textContent = tickets.filter(t => t.State === 'ISSUED').length;
+        document.getElementById('dash-validated-tickets').textContent = tickets.filter(t => t.State === 'VALIDATED').length;
 
         // Build table
         activityContainer.innerHTML = `
