@@ -14,6 +14,10 @@ export class TicketManager {
             <div class="page-header">
                 <h2 class="page-title">Ticket Management</h2>
                 <p class="page-description">Validate, consume, and manage tickets</p>
+                <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                    <button class="btn btn-secondary" id="seed-tickets-btn">Seed 500 Tickets</button>
+                    <span id="seed-result" style="align-self: center;"></span>
+                </div>
             </div>
 
             <!-- Validate Ticket Form -->
@@ -26,7 +30,7 @@ export class TicketManager {
                         <div class="form-group">
                             <label class="form-label" for="ticket-id">Ticket ID</label>
                             <input type="text" id="ticket-id" class="form-input" placeholder="TICKET-001" required>
-                            <span class="form-help">Unique identifier for the ticket</span>
+                            <span class="form-help">Enter an issued ticket ID (e.g. TICKET-001 through TICKET-500)</span>
                         </div>
 
                         <div class="form-group">
@@ -50,10 +54,10 @@ export class TicketManager {
                         <input type="text" id="ticket-search" class="form-input" placeholder="Search tickets..." style="width: 200px;">
                         <select id="ticket-filter" class="form-select" style="width: 150px;">
                             <option value="all">All States</option>
+                            <option value="ISSUED">Issued</option>
                             <option value="VALIDATED">Validated</option>
                             <option value="CONSUMED">Consumed</option>
                             <option value="DISPUTED">Disputed</option>
-                            <option value="PENDING">Pending</option>
                         </select>
                     </div>
                 </div>
@@ -64,6 +68,11 @@ export class TicketManager {
                 </div>
             </div>
         `;
+
+        // Setup seed button handler
+        document.getElementById('seed-tickets-btn').addEventListener('click', () => {
+            this.handleSeedTickets();
+        });
 
         // Setup form handler
         document.getElementById('validate-ticket-form').addEventListener('submit', (e) => {
@@ -90,7 +99,29 @@ export class TicketManager {
             this.ws.on('ticket_validated', () => this.loadTickets());
             this.ws.on('ticket_consumed', () => this.loadTickets());
             this.ws.on('ticket_disputed', () => this.loadTickets());
+            this.ws.on('tickets_seeded', () => this.loadTickets());
             this.wsListenersRegistered = true;
+        }
+    }
+
+    async handleSeedTickets() {
+        const btn = document.getElementById('seed-tickets-btn');
+        const resultSpan = document.getElementById('seed-result');
+
+        btn.disabled = true;
+        btn.textContent = 'Seeding...';
+        resultSpan.innerHTML = '';
+
+        try {
+            const result = await this.api.seedTickets();
+            const totalSeeded = result?.total_seeded ?? result?.seeded ?? 0;
+            resultSpan.innerHTML = `<span class="alert alert-success" style="padding: 0.25rem 0.5rem;">Seeded ${totalSeeded} tickets</span>`;
+            await this.loadTickets();
+        } catch (error) {
+            resultSpan.innerHTML = `<span class="alert alert-error" style="padding: 0.25rem 0.5rem;">Error: ${error.message}</span>`;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Seed 500 Tickets';
         }
     }
 
@@ -143,7 +174,7 @@ export class TicketManager {
         const listContainer = document.getElementById('ticket-list');
 
         if (!this.tickets || this.tickets.length === 0) {
-            listContainer.innerHTML = '<p class="text-muted text-center">No tickets found</p>';
+            listContainer.innerHTML = '<p class="text-muted text-center">No tickets found. Click "Seed 500 Tickets" to load the purchased ticket database.</p>';
             return;
         }
 
@@ -190,14 +221,24 @@ export class TicketManager {
                             <td class="font-mono">${ticket.ValidatorID || '-'}</td>
                             <td>${this.formatTimestamp(ticket.Timestamp)}</td>
                             <td>
+                                ${ticket.State === 'ISSUED' ? '<button class="btn btn-sm btn-primary" onclick="window.app.modules.tickets.quickValidate(\'' + ticket.ID + '\')">Validate</button>' : ''}
                                 ${ticket.State === 'VALIDATED' ? '<button class="btn btn-sm btn-primary" onclick="window.app.modules.tickets.consumeTicket(\'' + ticket.ID + '\')">Consume</button>' : ''}
-                                ${ticket.State !== 'DISPUTED' ? '<button class="btn btn-sm btn-error" onclick="window.app.modules.tickets.disputeTicket(\'' + ticket.ID + '\')">Dispute</button>' : ''}
+                                ${ticket.State !== 'DISPUTED' && ticket.State !== 'ISSUED' ? '<button class="btn btn-sm btn-error" onclick="window.app.modules.tickets.disputeTicket(\'' + ticket.ID + '\')">Dispute</button>' : ''}
                             </td>
                         </tr>
                     `).join('')}
                 </tbody>
             </table>
         `;
+    }
+
+    async quickValidate(ticketID) {
+        try {
+            await this.api.validateTicket(ticketID, null);
+            await this.loadTickets();
+        } catch (error) {
+            alert(`Failed to validate ticket: ${error.message}`);
+        }
     }
 
     async consumeTicket(ticketID) {
