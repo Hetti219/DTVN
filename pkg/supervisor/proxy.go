@@ -200,6 +200,81 @@ func (s *Server) proxyTicketRequest(w http.ResponseWriter, r *http.Request, endp
 	}
 }
 
+// handleProxySeedTickets seeds tickets on ALL running nodes (not just primary).
+// Seeding is a local operation — each node loads the same deterministic data independently.
+func (s *Server) handleProxySeedTickets(w http.ResponseWriter, r *http.Request) {
+	nodes := s.nodeManager.GetAllNodes()
+
+	var seededTotal int
+	var nodeResults []map[string]interface{}
+	var lastErr error
+
+	for _, node := range nodes {
+		if node.Status != NodeStatusRunning {
+			continue
+		}
+
+		url := fmt.Sprintf("http://127.0.0.1:%d/api/v1/tickets/seed", node.APIPort)
+		if !s.isNodeReachable(fmt.Sprintf("http://127.0.0.1:%d", node.APIPort)) {
+			continue
+		}
+
+		req, err := http.NewRequest("POST", url, nil)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		client := &http.Client{Timeout: 10 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		defer resp.Body.Close()
+
+		var result map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&result)
+
+		seeded := 0
+		if data, ok := result["data"].(map[string]interface{}); ok {
+			if s, ok := data["seeded"].(float64); ok {
+				seeded = int(s)
+			}
+		}
+		seededTotal += seeded
+		nodeResults = append(nodeResults, map[string]interface{}{
+			"node_id": node.ID,
+			"seeded":  seeded,
+		})
+	}
+
+	if len(nodeResults) == 0 {
+		errMsg := "No running nodes available. Start a cluster first."
+		if lastErr != nil {
+			errMsg = fmt.Sprintf("Failed to seed: %v", lastErr)
+		}
+		s.writeError(w, http.StatusServiceUnavailable, errMsg)
+		return
+	}
+
+	s.broadcastWSMessage(map[string]interface{}{
+		"type":      "tickets_seeded",
+		"count":     seededTotal,
+		"nodes":     len(nodeResults),
+		"timestamp": time.Now().Unix(),
+	})
+
+	s.writeJSON(w, map[string]interface{}{
+		"success": true,
+		"message": fmt.Sprintf("Seeded tickets on %d nodes", len(nodeResults)),
+		"data": map[string]interface{}{
+			"total_seeded": seededTotal,
+			"nodes":        nodeResults,
+		},
+	})
+}
+
 // Ticket proxy handlers
 
 func (s *Server) handleProxyGetAllTickets(w http.ResponseWriter, r *http.Request) {
