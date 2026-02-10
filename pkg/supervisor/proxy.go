@@ -214,12 +214,13 @@ func (s *Server) handleProxySeedTickets(w http.ResponseWriter, r *http.Request) 
 			continue
 		}
 
-		url := fmt.Sprintf("http://127.0.0.1:%d/api/v1/tickets/seed", node.APIPort)
-		if !s.isNodeReachable(fmt.Sprintf("http://127.0.0.1:%d", node.APIPort)) {
+		nodeBaseURL := fmt.Sprintf("http://127.0.0.1:%d", node.APIPort)
+		if !s.isNodeReachable(nodeBaseURL) {
 			continue
 		}
 
-		req, err := http.NewRequest("POST", url, nil)
+		seedURL := fmt.Sprintf("%s/api/v1/tickets/seed", nodeBaseURL)
+		req, err := http.NewRequest("POST", seedURL, nil)
 		if err != nil {
 			lastErr = err
 			continue
@@ -231,15 +232,15 @@ func (s *Server) handleProxySeedTickets(w http.ResponseWriter, r *http.Request) 
 			lastErr = err
 			continue
 		}
-		defer resp.Body.Close()
 
 		var result map[string]interface{}
 		json.NewDecoder(resp.Body).Decode(&result)
+		resp.Body.Close()
 
 		seeded := 0
 		if data, ok := result["data"].(map[string]interface{}); ok {
-			if s, ok := data["seeded"].(float64); ok {
-				seeded = int(s)
+			if val, ok := data["seeded"].(float64); ok {
+				seeded = int(val)
 			}
 		}
 		seededTotal += seeded
