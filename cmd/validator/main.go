@@ -1166,3 +1166,53 @@ func (n *ValidatorNode) loadTicketsFromStore() {
 
 	fmt.Printf("Node %s: ✅ Loaded %d tickets from persistent store\n", n.nodeID, len(records))
 }
+
+// SeedTickets generates and loads 500 deterministic dummy "purchased" tickets
+// into the node's state machine and persists them to BoltDB.
+// This simulates the pre-event ticket sales database that every node should have.
+func (n *ValidatorNode) SeedTickets() (int, error) {
+	sections := []string{"VIP", "Floor", "Balcony", "General"}
+	prices := []string{"150.00", "85.00", "65.00", "40.00"}
+
+	tickets := make([]*state.Ticket, 0, 500)
+	for i := 1; i <= 500; i++ {
+		ticketID := fmt.Sprintf("TICKET-%03d", i)
+		sectionIdx := (i - 1) % len(sections)
+		seatRow := string(rune('A' + ((i-1)/10)%26))
+		seatNum := (i-1)%10 + 1
+
+		data := fmt.Sprintf(`{"event":"Summer Music Festival 2026","venue":"Grand Arena","section":"%s","seat":"%s%d","price":"%s","buyer":"buyer_%03d@email.com"}`,
+			sections[sectionIdx], seatRow, seatNum, prices[sectionIdx], i)
+
+		tickets = append(tickets, &state.Ticket{
+			ID:        ticketID,
+			State:     state.StateIssued,
+			Data:      []byte(data),
+			Timestamp: time.Now().Unix(),
+			Metadata:  map[string]string{"source": "seed"},
+		})
+	}
+
+	seeded, err := n.stateMachine.SeedTickets(tickets)
+	if err != nil {
+		return 0, fmt.Errorf("failed to seed tickets: %w", err)
+	}
+
+	// Persist all seeded tickets to BoltDB
+	for _, t := range tickets {
+		record := &storage.TicketRecord{
+			ID:          t.ID,
+			State:       string(state.StateIssued),
+			Data:        t.Data,
+			ValidatorID: "",
+			Timestamp:   t.Timestamp,
+			Metadata:    t.Metadata,
+		}
+		if err := n.storage.SaveTicket(record); err != nil {
+			fmt.Printf("Node %s: ⚠️  Failed to persist seeded ticket %s: %v\n", n.nodeID, t.ID, err)
+		}
+	}
+
+	fmt.Printf("Node %s: 🎫 Seeded %d tickets (500 total requested, %d already existed)\n", n.nodeID, seeded, 500-seeded)
+	return seeded, nil
+}
