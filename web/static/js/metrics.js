@@ -23,7 +23,7 @@ export class Metrics {
             </div>
 
             <!-- Summary Stats -->
-            <div class="results-grid" style="margin-bottom: var(--spacing-lg);">
+            <div class="results-grid results-section">
                 <div class="result-item">
                     <span class="result-label">Consensus Rounds</span>
                     <span class="result-value" id="metric-sequence">-</span>
@@ -43,7 +43,7 @@ export class Metrics {
             </div>
 
             <!-- Secondary Stats -->
-            <div class="results-grid" style="margin-bottom: var(--spacing-lg);">
+            <div class="results-grid results-section">
                 <div class="result-item">
                     <span class="result-label">PBFT View</span>
                     <span class="result-value" id="metric-view">-</span>
@@ -68,7 +68,7 @@ export class Metrics {
                     <div class="card-header">
                         <h3 class="card-title">Consensus Progress</h3>
                     </div>
-                    <div class="card-body" style="height: 250px;">
+                    <div class="card-body chart-container">
                         <canvas id="consensus-chart"></canvas>
                     </div>
                 </div>
@@ -77,7 +77,7 @@ export class Metrics {
                     <div class="card-header">
                         <h3 class="card-title">Peer Count</h3>
                     </div>
-                    <div class="card-body" style="height: 250px;">
+                    <div class="card-body chart-container">
                         <canvas id="peer-chart"></canvas>
                     </div>
                 </div>
@@ -86,7 +86,7 @@ export class Metrics {
                     <div class="card-header">
                         <h3 class="card-title">Ticket Distribution</h3>
                     </div>
-                    <div class="card-body" style="height: 250px;">
+                    <div class="card-body chart-container">
                         <canvas id="ticket-chart"></canvas>
                     </div>
                 </div>
@@ -95,7 +95,7 @@ export class Metrics {
                     <div class="card-header">
                         <h3 class="card-title">Node Health</h3>
                     </div>
-                    <div class="card-body" style="height: 250px;">
+                    <div class="card-body chart-container">
                         <canvas id="node-health-chart"></canvas>
                     </div>
                 </div>
@@ -118,7 +118,18 @@ export class Metrics {
 
     initCharts() {
         const chartFont = { family: "'Inter', -apple-system, sans-serif" };
-        const gridColor = 'rgba(156, 163, 175, 0.15)';
+        const gridColor = 'rgba(47, 51, 54, 0.5)';
+        const tooltipStyle = {
+            backgroundColor: '#202327',
+            titleColor: '#E7E9EA',
+            bodyColor: '#E7E9EA',
+            borderColor: '#2F3336',
+            borderWidth: 1,
+            cornerRadius: 8,
+            titleFont: chartFont,
+            bodyFont: chartFont,
+            padding: 10
+        };
 
         this.charts.consensus = new Chart(document.getElementById('consensus-chart'), {
             type: 'line',
@@ -127,8 +138,8 @@ export class Metrics {
                 datasets: [{
                     label: 'Sequence #',
                     data: [],
-                    borderColor: '#3B82F6',
-                    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                    borderColor: '#1D9BF0',
+                    backgroundColor: 'rgba(29, 155, 240, 0.15)',
                     fill: true,
                     tension: 0.3,
                     pointRadius: 0,
@@ -144,16 +155,16 @@ export class Metrics {
                     x: {
                         display: true,
                         grid: { display: false },
-                        ticks: { maxTicksLimit: 8, font: chartFont, color: '#9CA3AF' }
+                        ticks: { maxTicksLimit: 8, font: chartFont, color: '#71767B' }
                     },
                     y: {
                         beginAtZero: true,
                         grid: { color: gridColor },
-                        ticks: { font: chartFont, color: '#9CA3AF', precision: 0 },
-                        title: { display: true, text: 'Sequence #', font: chartFont, color: '#9CA3AF' }
+                        ticks: { font: chartFont, color: '#71767B', precision: 0 },
+                        title: { display: true, text: 'Sequence #', font: chartFont, color: '#71767B' }
                     }
                 },
-                plugins: { legend: { display: false } }
+                plugins: { legend: { display: false }, tooltip: tooltipStyle }
             }
         });
 
@@ -164,8 +175,8 @@ export class Metrics {
                 datasets: [{
                     label: 'Peers',
                     data: [],
-                    borderColor: '#10B981',
-                    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                    borderColor: '#00BA7C',
+                    backgroundColor: 'rgba(0, 186, 124, 0.15)',
                     fill: true,
                     tension: 0.3,
                     pointRadius: 0,
@@ -181,16 +192,16 @@ export class Metrics {
                     x: {
                         display: true,
                         grid: { display: false },
-                        ticks: { maxTicksLimit: 8, font: chartFont, color: '#9CA3AF' }
+                        ticks: { maxTicksLimit: 8, font: chartFont, color: '#71767B' }
                     },
                     y: {
                         beginAtZero: true,
                         grid: { color: gridColor },
-                        ticks: { font: chartFont, color: '#9CA3AF', stepSize: 1 },
-                        title: { display: true, text: 'Peers', font: chartFont, color: '#9CA3AF' }
+                        ticks: { font: chartFont, color: '#71767B', stepSize: 1 },
+                        title: { display: true, text: 'Peers', font: chartFont, color: '#71767B' }
                     }
                 },
-                plugins: { legend: { display: false } }
+                plugins: { legend: { display: false }, tooltip: tooltipStyle }
             }
         });
 
@@ -200,7 +211,7 @@ export class Metrics {
                 labels: ['Issued', 'Validated', 'Consumed', 'Disputed'],
                 datasets: [{
                     data: [0, 0, 0, 0],
-                    backgroundColor: ['#6B7280', '#10B981', '#3B82F6', '#EF4444'],
+                    backgroundColor: ['#71767B', '#00BA7C', '#1D9BF0', '#F4212E'],
                     borderWidth: 0,
                     hoverOffset: 4
                 }]
@@ -209,12 +220,13 @@ export class Metrics {
                 responsive: true,
                 maintainAspectRatio: false,
                 animation: { duration: 300 },
-                cutout: '60%',
+                cutout: '72%',
                 plugins: {
                     legend: {
                         position: 'bottom',
-                        labels: { font: chartFont, color: '#9CA3AF', padding: 16, usePointStyle: true }
-                    }
+                        labels: { font: chartFont, color: '#71767B', padding: 16, usePointStyle: true }
+                    },
+                    tooltip: tooltipStyle
                 }
             }
         });
@@ -226,8 +238,8 @@ export class Metrics {
                 datasets: [{
                     label: 'Nodes',
                     data: [0, 0, 0, 0],
-                    backgroundColor: ['#10B981', '#F59E0B', '#6B7280', '#EF4444'],
-                    borderRadius: 4,
+                    backgroundColor: ['#00BA7C', '#FFD400', '#71767B', '#F4212E'],
+                    borderRadius: 8,
                     borderSkipped: false
                 }]
             },
@@ -238,15 +250,15 @@ export class Metrics {
                 scales: {
                     x: {
                         grid: { display: false },
-                        ticks: { font: chartFont, color: '#9CA3AF' }
+                        ticks: { font: chartFont, color: '#71767B' }
                     },
                     y: {
                         beginAtZero: true,
                         grid: { color: gridColor },
-                        ticks: { font: chartFont, color: '#9CA3AF', stepSize: 1, precision: 0 }
+                        ticks: { font: chartFont, color: '#71767B', stepSize: 1, precision: 0 }
                     }
                 },
-                plugins: { legend: { display: false } }
+                plugins: { legend: { display: false }, tooltip: tooltipStyle }
             }
         });
     }

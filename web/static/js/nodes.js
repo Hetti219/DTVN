@@ -24,7 +24,7 @@ export class NodeManager {
                 <p class="page-description">Start, stop, and monitor validator nodes</p>
             </div>
 
-            <div id="supervisor-mode-alert" class="alert alert-info" style="display: none;">
+            <div id="supervisor-mode-alert" class="alert alert-info hidden">
                 <strong>Note:</strong> Running in validator mode - limited node management.
                 Use the supervisor binary for full control.
             </div>
@@ -45,8 +45,8 @@ export class NodeManager {
                     <div class="form-row">
                         <div class="form-group">
                             <label for="cluster-size">Cluster Size</label>
-                            <input type="number" id="cluster-size" class="form-control"
-                                   value="4" min="1" max="30" style="width: 100px;" ${supervisorControlsDisabled}>
+                            <input type="number" id="cluster-size" class="form-input input-narrow"
+                                   value="4" min="1" max="30" ${supervisorControlsDisabled}>
                         </div>
                     </div>
                 </div>
@@ -66,7 +66,7 @@ export class NodeManager {
                 </div>
             </div>
 
-            <div class="card" id="node-logs-card" style="display: none;">
+            <div class="card hidden" id="node-logs-card">
                 <div class="card-header">
                     <h3 class="card-title">Node Logs: <span id="logs-node-id"></span></h3>
                     <button class="btn btn-secondary btn-sm" id="close-logs-btn">Close</button>
@@ -77,7 +77,7 @@ export class NodeManager {
             </div>
 
             <!-- Start Node Modal -->
-            <div id="start-node-modal" class="modal" style="display: none;">
+            <div id="start-node-modal" class="modal hidden">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h3>Start New Node</h3>
@@ -86,7 +86,7 @@ export class NodeManager {
                     <div class="modal-body">
                         <div class="form-group">
                             <label for="new-node-id">Node ID</label>
-                            <input type="text" id="new-node-id" class="form-control"
+                            <input type="text" id="new-node-id" class="form-input"
                                    placeholder="e.g., node5">
                         </div>
                         <div class="form-group">
@@ -101,7 +101,7 @@ export class NodeManager {
                         </div>
                         <div class="form-group">
                             <label for="new-node-bootstrap-addr">Bootstrap Address (optional)</label>
-                            <input type="text" id="new-node-bootstrap-addr" class="form-control"
+                            <input type="text" id="new-node-bootstrap-addr" class="form-input"
                                    placeholder="/ip4/127.0.0.1/tcp/4001/p2p/...">
                         </div>
                     </div>
@@ -174,7 +174,7 @@ export class NodeManager {
     updateSupervisorModeAlert() {
         const alert = document.getElementById('supervisor-mode-alert');
         if (alert) {
-            alert.style.display = this.isSupervisorMode ? 'none' : 'block';
+            alert.classList.toggle('hidden', this.isSupervisorMode);
         }
     }
 
@@ -231,7 +231,7 @@ export class NodeManager {
                 <div class="node-details">
                     <div class="node-detail">
                         <span class="detail-label">Role:</span>
-                        <span class="detail-value">${node.is_primary ? 'Primary' : 'Replica'}</span>
+                        <span class="node-role-badge ${node.is_primary ? 'primary' : 'replica'}">${node.is_primary ? 'Primary' : 'Replica'}</span>
                     </div>
                     <div class="node-detail">
                         <span class="detail-label">P2P Port:</span>
@@ -268,7 +268,7 @@ export class NodeManager {
                     </div>
                 ` : `
                     <div class="node-actions">
-                        <p class="text-muted" style="font-size: 0.85em; margin: 0;">View only - use supervisor for control</p>
+                        <p class="view-only-text">View only - use supervisor for control</p>
                     </div>
                 `}
             </div>
@@ -303,7 +303,7 @@ export class NodeManager {
     showStartNodeModal() {
         const modal = document.getElementById('start-node-modal');
         if (modal) {
-            modal.style.display = 'flex';
+            modal.classList.remove('hidden');
             // Generate suggested node ID
             const nextId = `node${this.nodes.length}`;
             document.getElementById('new-node-id').value = nextId;
@@ -313,7 +313,7 @@ export class NodeManager {
     hideStartNodeModal() {
         const modal = document.getElementById('start-node-modal');
         if (modal) {
-            modal.style.display = 'none';
+            modal.classList.add('hidden');
         }
     }
 
@@ -462,7 +462,7 @@ export class NodeManager {
         const logsOutput = document.getElementById('node-logs-output');
 
         if (logsCard && logsNodeId && logsOutput) {
-            logsCard.style.display = 'block';
+            logsCard.classList.remove('hidden');
             logsNodeId.textContent = nodeId;
             logsOutput.innerHTML = '<div class="loading">Loading logs...</div>';
 
@@ -501,7 +501,7 @@ export class NodeManager {
         this.selectedNodeId = null;
         const logsCard = document.getElementById('node-logs-card');
         if (logsCard) {
-            logsCard.style.display = 'none';
+            logsCard.classList.add('hidden');
         }
     }
 

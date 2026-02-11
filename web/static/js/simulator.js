@@ -21,7 +21,7 @@ export class Simulator {
                 <p class="page-description">Run Byzantine fault tolerance simulations</p>
             </div>
 
-            <div id="supervisor-mode-alert" class="alert alert-info" style="display: ${this.isSupervisorMode ? 'none' : 'block'};">
+            <div id="supervisor-mode-alert" class="alert alert-info ${this.isSupervisorMode ? 'hidden' : ''}">
                 <strong>Note:</strong> Running in validator mode - simulation features limited.
                 Use supervisor mode for full simulation control with live output.
                 <br><br>
@@ -39,37 +39,37 @@ export class Simulator {
                         <div class="form-grid">
                             <div class="form-group">
                                 <label class="form-label" for="sim-nodes">Total Nodes</label>
-                                <input type="number" id="sim-nodes" class="form-control" value="7" min="4" max="30">
+                                <input type="number" id="sim-nodes" class="form-input" value="7" min="4" max="30">
                                 <span class="form-help">4-30 nodes supported</span>
                             </div>
 
                             <div class="form-group">
                                 <label class="form-label" for="sim-byzantine">Byzantine Nodes</label>
-                                <input type="number" id="sim-byzantine" class="form-control" value="2" min="0" max="10">
+                                <input type="number" id="sim-byzantine" class="form-input" value="2" min="0" max="10">
                                 <span class="form-help" id="byzantine-limit">Max: 2 (n/3)</span>
                             </div>
 
                             <div class="form-group">
                                 <label class="form-label" for="sim-tickets">Tickets</label>
-                                <input type="number" id="sim-tickets" class="form-control" value="100" min="1" max="1000">
+                                <input type="number" id="sim-tickets" class="form-input" value="100" min="1" max="1000">
                                 <span class="form-help">1-1000 tickets</span>
                             </div>
 
                             <div class="form-group">
                                 <label class="form-label" for="sim-duration">Duration (seconds)</label>
-                                <input type="number" id="sim-duration" class="form-control" value="60" min="10" max="600">
+                                <input type="number" id="sim-duration" class="form-input" value="60" min="10" max="600">
                                 <span class="form-help">10-600 seconds</span>
                             </div>
 
                             <div class="form-group">
                                 <label class="form-label" for="sim-latency">Network Latency (ms)</label>
-                                <input type="number" id="sim-latency" class="form-control" value="50" min="0" max="1000">
+                                <input type="number" id="sim-latency" class="form-input" value="50" min="0" max="1000">
                                 <span class="form-help">Simulated delay per hop</span>
                             </div>
 
                             <div class="form-group">
                                 <label class="form-label" for="sim-packet-loss">Packet Loss (%)</label>
-                                <input type="number" id="sim-packet-loss" class="form-control" value="1" min="0" max="50" step="0.1">
+                                <input type="number" id="sim-packet-loss" class="form-input" value="1" min="0" max="50" step="0.1">
                                 <span class="form-help">0-50% loss rate</span>
                             </div>
                         </div>
@@ -86,7 +86,7 @@ export class Simulator {
                             <button type="submit" class="btn btn-primary" id="start-sim-btn">
                                 Start Simulation
                             </button>
-                            <button type="button" class="btn btn-danger" id="stop-sim-btn" style="display: none;">
+                            <button type="button" class="btn btn-danger hidden" id="stop-sim-btn">
                                 Stop Simulation
                             </button>
                         </div>
@@ -95,7 +95,7 @@ export class Simulator {
             </div>
 
             <!-- Progress Card -->
-            <div class="card" id="progress-card" style="display: none;">
+            <div class="card hidden" id="progress-card">
                 <div class="card-header">
                     <h3 class="card-title">Simulation Progress</h3>
                 </div>
@@ -128,7 +128,7 @@ export class Simulator {
             </div>
 
             <!-- Results Card -->
-            <div class="card" id="results-card" style="display: none;">
+            <div class="card hidden" id="results-card">
                 <div class="card-header">
                     <h3 class="card-title">Simulation Results</h3>
                 </div>
@@ -302,16 +302,16 @@ export class Simulator {
         const isRunning = status === 'running';
 
         if (startBtn) {
-            startBtn.style.display = isRunning ? 'none' : 'inline-block';
+            startBtn.classList.toggle('hidden', isRunning);
             startBtn.disabled = !this.isSupervisorMode;
         }
 
         if (stopBtn) {
-            stopBtn.style.display = isRunning ? 'inline-block' : 'none';
+            stopBtn.classList.toggle('hidden', !isRunning);
         }
 
         if (progressCard) {
-            progressCard.style.display = isRunning ? 'block' : 'none';
+            progressCard.classList.toggle('hidden', !isRunning);
         }
 
         // Disable form inputs while running
@@ -373,7 +373,7 @@ export class Simulator {
         // Show progress card
         const progressCard = document.getElementById('progress-card');
         if (progressCard) {
-            progressCard.style.display = 'block';
+            progressCard.classList.remove('hidden');
         }
     }
 
@@ -386,7 +386,7 @@ export class Simulator {
         const resultsGrid = document.getElementById('results-grid');
 
         if (resultsCard && resultsGrid) {
-            resultsCard.style.display = 'block';
+            resultsCard.classList.remove('hidden');
 
             const successRate = results.success_rate || 0;
             const successClass = successRate >= 90 ? 'success' : successRate >= 70 ? 'warning' : 'danger';

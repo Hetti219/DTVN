@@ -6,19 +6,39 @@
     margin-bottom: var(--spacing-xl);
 }
 
+.dashboard-grid .card {
+    margin-bottom: 0;
+}
+
 /* Cards */
 .card {
     background-color: var(--color-card-bg);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     padding: var(--spacing-lg);
-    box-shadow: var(--shadow-sm);
-    transition: box-shadow var(--transition-normal);
+    margin-bottom: var(--spacing-lg);
+    animation: cardFadeIn 0.25s ease-out both;
 }
 
-.card:hover {
-    box-shadow: var(--shadow-md);
+.card:last-child {
+    margin-bottom: 0;
 }
+
+@keyframes cardFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.dashboard-grid .card:nth-child(1) { animation-delay: 0ms; }
+.dashboard-grid .card:nth-child(2) { animation-delay: 50ms; }
+.dashboard-grid .card:nth-child(3) { animation-delay: 100ms; }
+.dashboard-grid .card:nth-child(4) { animation-delay: 150ms; }
 
 .card-header {
     display: flex;
@@ -30,36 +50,46 @@
 }
 
 .card-title {
-    font-size: 1.125rem;
-    font-weight: 600;
+    font-family: var(--font-sans);
+    font-size: 15px;
+    font-weight: 700;
     color: var(--color-text);
+    letter-spacing: -0.01em;
 }
 
 .card-body {
     color: var(--color-text-secondary);
 }
 
-/* Stat Display */
-.stat {
+.card-full-width {
+    grid-column: 1 / -1;
+}
+
+/* Dashboard-specific stacked stat display (column layout) */
+.dash-stat {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-xs);
     margin-bottom: var(--spacing-md);
 }
 
-.stat-label {
-    font-size: 0.875rem;
+.dash-stat-label {
+    font-family: var(--font-sans);
+    font-size: 13px;
     color: var(--color-text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    font-weight: 500;
 }
 
-.stat-value {
-    font-size: 2rem;
+.dash-stat-value {
+    font-family: var(--font-sans);
+    font-size: 1.5rem;
     font-weight: 700;
     color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
 }
 
+/* Stat rows (key-value pairs in cards) */
 .stat-row {
     display: flex;
     justify-content: space-between;
@@ -85,79 +115,78 @@ table {
 }
 
 thead {
-    background-color: var(--color-bg);
-    border-bottom: 2px solid var(--color-border);
+    background-color: var(--color-card-bg);
+    border-bottom: 1px solid var(--color-border);
 }
 
 th {
     padding: var(--spacing-md);
     text-align: left;
+    font-family: var(--font-sans);
     font-weight: 600;
-    color: var(--color-text-secondary);
+    color: var(--color-text);
+    font-size: 12px;
     text-transform: uppercase;
-    font-size: 0.75rem;
     letter-spacing: 0.05em;
 }
 
 td {
     padding: var(--spacing-md);
     border-bottom: 1px solid var(--color-border);
+    color: var(--color-text);
+}
+
+tbody tr:nth-child(even) {
+    background-color: rgba(231, 233, 234, 0.015);
 }
 
 tbody tr:hover {
-    background-color: var(--color-bg);
+    background-color: rgba(231, 233, 234, 0.03);
+}
+
+tbody tr.clickable:hover {
     cursor: pointer;
 }
 
-/* State badges */
-.badge {
-    display: inline-block;
-    padding: var(--spacing-xs) var(--spacing-sm);
-    border-radius: var(--radius-sm);
-    font-size: 0.75rem;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-}
-
+/* Domain-specific badge variants (base .badge is in components.css) */
 .badge-issued {
-    background-color: rgba(107, 114, 128, 0.1);
+    background-color: rgba(113, 118, 123, 0.15);
     color: var(--color-issued);
 }
 
 .badge-pending {
-    background-color: rgba(245, 158, 11, 0.1);
+    background-color: rgba(255, 212, 0, 0.15);
     color: var(--color-pending);
 }
 
 .badge-validated {
-    background-color: rgba(16, 185, 129, 0.1);
+    background-color: rgba(0, 186, 124, 0.15);
     color: var(--color-validated);
 }
 
 .badge-consumed {
-    background-color: rgba(59, 130, 246, 0.1);
+    background-color: rgba(29, 155, 240, 0.15);
     color: var(--color-consumed);
 }
 
 .badge-disputed {
-    background-color: rgba(239, 68, 68, 0.1);
+    background-color: rgba(244, 33, 46, 0.15);
     color: var(--color-disputed);
 }
 
 /* Role badges */
 .badge-primary {
-    background-color: rgba(59, 130, 246, 0.1);
+    background-color: rgba(29, 155, 240, 0.15);
     color: var(--color-primary);
 }
 
 .badge-replica {
-    background-color: rgba(107, 114, 128, 0.1);
+    background-color: rgba(113, 118, 123, 0.15);
     color: var(--color-replica);
 }
 
 .badge-byzantine {
-    background-color: rgba(220, 38, 38, 0.1);
+    background-color: rgba(244, 33, 46, 0.15);
     color: var(--color-byzantine);
 }
 
@@ -174,27 +203,27 @@ tbody tr:hover {
 }
 
 .page-title {
-    font-size: 1.875rem;
-    font-weight: 700;
-    margin-bottom: var(--spacing-sm);
+    font-family: var(--font-sans);
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: var(--spacing-xs);
+    color: var(--color-text);
 }
 
 .page-description {
+    font-family: var(--font-sans);
     color: var(--color-text-secondary);
-    font-size: 1rem;
+    font-size: 15px;
+    line-height: 1.5;
 }
 
-/* Empty states */
-.empty-state {
-    text-align: center;
-    padding: var(--spacing-xl);
-    color: var(--color-text-secondary);
-}
-
+/* Empty state sub-elements (base .empty-state is in components.css) */
 .empty-state-icon {
-    font-size: 3rem;
+    font-size: 2rem;
     margin-bottom: var(--spacing-md);
-    opacity: 0.5;
+    opacity: 0.4;
+    color: var(--color-text-secondary);
 }
 
 .empty-state-text {
@@ -204,6 +233,7 @@ tbody tr:hover {
 
 .empty-state-subtext {
     font-size: 0.875rem;
+    color: var(--color-text-secondary);
 }
 
 /* Responsive dashboard grid */
@@ -215,14 +245,14 @@ tbody tr:hover {
 
 @media (max-width: 640px) {
     .page-title {
-        font-size: 1.5rem;
+        font-size: 18px;
     }
 
     .quick-actions {
         flex-direction: column;
     }
 
-    .stat-value {
-        font-size: 1.5rem;
+    .dash-stat-value {
+        font-size: 1.25rem;
     }
 }

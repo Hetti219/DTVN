@@ -28,14 +28,14 @@ export class NetworkViz {
 
             <div class="card">
                 <div class="card-header">
-                    <h3 class="card-title">Network Graph <span id="network-node-count" style="font-weight: normal; color: var(--color-text-muted);"></span></h3>
+                    <h3 class="card-title">Network Graph <span id="network-node-count" class="text-muted"></span></h3>
                     <div class="quick-actions">
                         <button class="btn btn-sm btn-secondary" id="reset-zoom-btn">Reset Zoom</button>
                         <button class="btn btn-sm btn-secondary" id="refresh-network-btn">Refresh</button>
                     </div>
                 </div>
                 <div class="card-body">
-                    <div id="network-graph" style="min-height: 600px; position: relative; background-color: var(--color-bg); border-radius: var(--radius-md);">
+                    <div id="network-graph" class="network-graph-container">
                     </div>
                 </div>
             </div>
@@ -46,22 +46,30 @@ export class NetworkViz {
                     <h3 class="card-title">Legend</h3>
                 </div>
                 <div class="card-body">
-                    <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#3B82F6"/></svg>
+                    <div class="legend-items">
+                        <div class="legend-item">
+                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#1D9BF0"/></svg>
                             <span>Primary Node</span>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#10B981"/></svg>
+                        <div class="legend-item">
+                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#00BA7C"/></svg>
                             <span>Running Replica</span>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#F59E0B"/></svg>
+                        <div class="legend-item">
+                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#FFD400"/></svg>
                             <span>Starting Node</span>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#DC2626"/></svg>
+                        <div class="legend-item">
+                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#F4212E"/></svg>
                             <span>Error / Stopped</span>
+                        </div>
+                        <div class="legend-item">
+                            <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#1D9BF0" stroke-width="2" stroke-opacity="0.5"/></svg>
+                            <span>Bootstrap Link</span>
+                        </div>
+                        <div class="legend-item">
+                            <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#71767B" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="4 3"/></svg>
+                            <span>DHT Mesh Link</span>
                         </div>
                     </div>
                 </div>
@@ -141,10 +149,12 @@ export class NetworkViz {
 
         // Create force simulation
         this.simulation = d3.forceSimulation()
-            .force('link', d3.forceLink().id(d => d.id).distance(120))
-            .force('charge', d3.forceManyBody().strength(-300))
+            .force('link', d3.forceLink().id(d => d.id)
+                .distance(d => d.type === 'bootstrap' ? 120 : 180)
+                .strength(d => d.type === 'bootstrap' ? 0.7 : 0.1))
+            .force('charge', d3.forceManyBody().strength(-400))
             .force('center', d3.forceCenter(width / 2, height / 2))
-            .force('collision', d3.forceCollide().radius(35));
+            .force('collision', d3.forceCollide().radius(40));
     }
 
     async _loadNetworkData() {
@@ -231,18 +241,23 @@ export class NetworkViz {
             });
         });
 
-        // Build links: star topology with primary/bootstrap as hub
-        // This reflects the actual bootstrap connection pattern
-        const primary = this.nodes.find(n => n.isPrimary) || this.nodes.find(n => n.id === 'node0');
-        if (primary) {
-            this.nodes.forEach(node => {
-                if (node.id !== primary.id && (node.isRunning || node.isStarting)) {
-                    this.links.push({
-                        source: primary.id,
-                        target: node.id,
-                    });
-                }
-            });
+        // Build links: full mesh between all active nodes (reflects actual DHT discovery)
+        // After bootstrap, Kademlia DHT connects every node to every other node.
+        const activeNodes = this.nodes.filter(n => n.isRunning || n.isStarting);
+        const primaryId = (this.nodes.find(n => n.isPrimary) || this.nodes.find(n => n.id === 'node0'))?.id;
+
+        for (let i = 0; i < activeNodes.length; i++) {
+            for (let j = i + 1; j < activeNodes.length; j++) {
+                const a = activeNodes[i].id;
+                const b = activeNodes[j].id;
+                // Bootstrap links: initial connection to/from the bootstrap node
+                const isBootstrap = (a === primaryId || b === primaryId);
+                this.links.push({
+                    source: a,
+                    target: b,
+                    type: isBootstrap ? 'bootstrap' : 'mesh',
+                });
+            }
         }
 
         // Update node count display
@@ -307,11 +322,11 @@ export class NetworkViz {
     }
 
     getNodeColor(d) {
-        if (d.isError || d.isStopped) return '#DC2626';
-        if (d.isStarting) return '#F59E0B';
-        if (d.isPrimary) return '#3B82F6';
-        if (d.isRunning) return '#10B981';
-        return '#6B7280';
+        if (d.isError || d.isStopped) return '#F4212E';
+        if (d.isStarting) return '#FFD400';
+        if (d.isPrimary) return '#1D9BF0';
+        if (d.isRunning) return '#00BA7C';
+        return '#71767B';
     }
 
     renderGraph() {
@@ -327,20 +342,21 @@ export class NetworkViz {
                 .attr('x', width / 2)
                 .attr('y', 300)
                 .attr('text-anchor', 'middle')
-                .attr('fill', 'var(--color-text-muted)')
+                .attr('fill', '#71767B')
                 .attr('font-size', '14px')
                 .text('No nodes available. Start a cluster to see the network graph.');
             return;
         }
 
-        // Create links
+        // Create links (bootstrap = solid, mesh/DHT = dashed)
         const link = this.g.append('g')
             .selectAll('line')
             .data(this.links)
             .enter().append('line')
-            .attr('stroke', '#999')
-            .attr('stroke-opacity', 0.4)
-            .attr('stroke-width', 1.5);
+            .attr('stroke', d => d.type === 'bootstrap' ? '#1D9BF0' : '#71767B')
+            .attr('stroke-opacity', d => d.type === 'bootstrap' ? 0.5 : 0.25)
+            .attr('stroke-width', d => d.type === 'bootstrap' ? 2 : 1)
+            .attr('stroke-dasharray', d => d.type === 'mesh' ? '4 3' : 'none');
 
         // Create node groups
         const node = this.g.append('g')
@@ -352,12 +368,20 @@ export class NetworkViz {
                 .on('drag', (event, d) => this.dragged(event, d))
                 .on('end', (event, d) => this.dragEnded(event, d)));
 
+        // Add glow ring for primary node
+        node.filter(d => d.isPrimary).append('circle')
+            .attr('r', 26)
+            .attr('fill', 'none')
+            .attr('stroke', '#1D9BF0')
+            .attr('stroke-width', 2)
+            .attr('stroke-opacity', 0.2);
+
         // Add circles for nodes
         node.append('circle')
             .attr('r', d => d.isPrimary ? 20 : 16)
             .attr('fill', d => this.getNodeColor(d))
-            .attr('stroke', d => d.isPrimary ? '#1D4ED8' : 'none')
-            .attr('stroke-width', d => d.isPrimary ? 3 : 0);
+            .attr('stroke', d => d.isPrimary ? '#1A8CD8' : 'none')
+            .attr('stroke-width', d => d.isPrimary ? 2 : 0);
 
         // Add labels
         node.append('text')
@@ -365,7 +389,7 @@ export class NetworkViz {
             .attr('x', 0)
             .attr('y', 30)
             .attr('text-anchor', 'middle')
-            .attr('fill', 'var(--color-text)')
+            .attr('fill', '#E7E9EA')
             .attr('font-size', '12px');
 
         // Add tooltips

@@ -55,27 +55,27 @@ export class Dashboard {
                         <h3 class="card-title">Network Health</h3>
                     </div>
                     <div class="card-body">
-                        <div class="stat">
-                            <span class="stat-label">Connection Status</span>
+                        <div class="dash-stat">
+                            <span class="dash-stat-label">Connection Status</span>
                             <span id="dash-connection" class="badge badge-validated">Healthy</span>
                         </div>
-                        <div class="stat">
-                            <span class="stat-label">Total Tickets</span>
-                            <span id="dash-total-tickets" class="stat-value">0</span>
+                        <div class="dash-stat">
+                            <span class="dash-stat-label">Total Tickets</span>
+                            <span id="dash-total-tickets" class="dash-stat-value">0</span>
                         </div>
-                        <div class="stat">
-                            <span class="stat-label">Issued (Awaiting Scan)</span>
-                            <span id="dash-issued-tickets" class="stat-value">0</span>
+                        <div class="dash-stat">
+                            <span class="dash-stat-label">Issued (Awaiting Scan)</span>
+                            <span id="dash-issued-tickets" class="dash-stat-value">0</span>
                         </div>
-                        <div class="stat">
-                            <span class="stat-label">Validated</span>
-                            <span id="dash-validated-tickets" class="stat-value">0</span>
+                        <div class="dash-stat">
+                            <span class="dash-stat-label">Validated</span>
+                            <span id="dash-validated-tickets" class="dash-stat-value">0</span>
                         </div>
                     </div>
                 </div>
 
                 <!-- Recent Activity Card -->
-                <div class="card" style="grid-column: 1 / -1;">
+                <div class="card card-full-width">
                     <div class="card-header">
                         <h3 class="card-title">Recent Activity</h3>
                         <button class="btn btn-sm btn-secondary" onclick="window.app.loadSection('tickets')">
@@ -98,16 +98,16 @@ export class Dashboard {
                 <div class="card-body">
                     <div class="quick-actions">
                         <button class="btn btn-primary" onclick="window.app.loadSection('tickets')">
-                            🎫 Validate Ticket
+                            Validate Ticket
                         </button>
                         <button class="btn btn-primary" onclick="window.app.loadSection('simulator')">
-                            🧪 Run Simulation
+                            Run Simulation
                         </button>
                         <button class="btn btn-secondary" onclick="window.app.loadSection('network')">
-                            🔗 View Network
+                            View Network
                         </button>
                         <button class="btn btn-secondary" onclick="window.app.loadSection('metrics')">
-                            📈 View Metrics
+                            View Metrics
                         </button>
                     </div>
                 </div>
@@ -204,7 +204,7 @@ export class Dashboard {
                 </thead>
                 <tbody>
                     ${this.recentTickets.map(ticket => `
-                        <tr onclick="window.app.loadSection('tickets')">
+                        <tr class="clickable" onclick="window.app.loadSection('tickets')">
                             <td class="font-mono">${ticket.ID || '-'}</td>
                             <td><span class="badge badge-${(ticket.State || 'issued').toLowerCase()}">${ticket.State || 'ISSUED'}</span></td>
                             <td class="font-mono">${ticket.ValidatorID || '-'}</td>
