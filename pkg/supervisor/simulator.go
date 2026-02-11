@@ -261,6 +261,12 @@ func (s *SimulatorController) streamOutput(reader io.Reader) {
 	for scanner.Scan() {
 		line := scanner.Text()
 
+		// Deduplicate across stdout/stderr streams — the simulator writes
+		// identical output to both, so skip lines already seen recently.
+		if s.isDuplicateLine(line) {
+			continue
+		}
+
 		s.mu.Lock()
 		s.addOutput(line)
 		s.mu.Unlock()
@@ -303,9 +309,8 @@ func (s *SimulatorController) streamOutput(reader io.Reader) {
 			s.parseResultLine(matches[1], matches[2])
 		}
 
-		// Notify output callback (with deduplication)
-		// Check if this line was recently seen from the other stream (stdout/stderr)
-		if s.outputCallback != nil && !s.isDuplicateLine(line) {
+		// Notify output callback
+		if s.outputCallback != nil {
 			s.outputCallback(line)
 		}
 	}
