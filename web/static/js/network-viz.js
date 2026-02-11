@@ -28,14 +28,14 @@ export class NetworkViz {
 
             <div class="card">
                 <div class="card-header">
-                    <h3 class="card-title">Network Graph <span id="network-node-count" style="font-weight: normal; color: var(--color-text-muted);"></span></h3>
+                    <h3 class="card-title">Network Graph <span id="network-node-count" class="text-muted"></span></h3>
                     <div class="quick-actions">
                         <button class="btn btn-sm btn-secondary" id="reset-zoom-btn">Reset Zoom</button>
                         <button class="btn btn-sm btn-secondary" id="refresh-network-btn">Refresh</button>
                     </div>
                 </div>
                 <div class="card-body">
-                    <div id="network-graph" style="min-height: 600px; position: relative; background-color: var(--color-bg); border-radius: var(--radius-md);">
+                    <div id="network-graph" class="network-graph-container">
                     </div>
                 </div>
             </div>
@@ -46,20 +46,20 @@ export class NetworkViz {
                     <h3 class="card-title">Legend</h3>
                 </div>
                 <div class="card-body">
-                    <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                    <div class="legend-items">
+                        <div class="legend-item">
                             <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#1D9BF0"/></svg>
                             <span>Primary Node</span>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div class="legend-item">
                             <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#00BA7C"/></svg>
                             <span>Running Replica</span>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div class="legend-item">
                             <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#FFD400"/></svg>
                             <span>Starting Node</span>
                         </div>
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <div class="legend-item">
                             <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#F4212E"/></svg>
                             <span>Error / Stopped</span>
                         </div>
@@ -339,8 +339,8 @@ export class NetworkViz {
             .data(this.links)
             .enter().append('line')
             .attr('stroke', '#1D9BF0')
-            .attr('stroke-opacity', 0.15)
-            .attr('stroke-width', 1.5);
+            .attr('stroke-opacity', 0.45)
+            .attr('stroke-width', 2);
 
         // Create node groups
         const node = this.g.append('g')
@@ -351,6 +351,14 @@ export class NetworkViz {
                 .on('start', (event, d) => this.dragStarted(event, d))
                 .on('drag', (event, d) => this.dragged(event, d))
                 .on('end', (event, d) => this.dragEnded(event, d)));
+
+        // Add glow ring for primary node
+        node.filter(d => d.isPrimary).append('circle')
+            .attr('r', 26)
+            .attr('fill', 'none')
+            .attr('stroke', '#1D9BF0')
+            .attr('stroke-width', 2)
+            .attr('stroke-opacity', 0.2);
 
         // Add circles for nodes
         node.append('circle')
