@@ -6,13 +6,22 @@
     margin-bottom: var(--spacing-xl);
 }
 
+.dashboard-grid .card {
+    margin-bottom: 0;
+}
+
 /* Cards */
 .card {
     background-color: var(--color-card-bg);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     padding: var(--spacing-lg);
+    margin-bottom: var(--spacing-lg);
     animation: cardFadeIn 0.25s ease-out both;
+}
+
+.card:last-child {
+    margin-bottom: 0;
 }
 
 @keyframes cardFadeIn {

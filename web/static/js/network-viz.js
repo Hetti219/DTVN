@@ -63,6 +63,14 @@ export class NetworkViz {
                             <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#F4212E"/></svg>
                             <span>Error / Stopped</span>
                         </div>
+                        <div class="legend-item">
+                            <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#1D9BF0" stroke-width="2" stroke-opacity="0.5"/></svg>
+                            <span>Bootstrap Link</span>
+                        </div>
+                        <div class="legend-item">
+                            <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#71767B" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="4 3"/></svg>
+                            <span>DHT Mesh Link</span>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -141,10 +149,12 @@ export class NetworkViz {
 
         // Create force simulation
         this.simulation = d3.forceSimulation()
-            .force('link', d3.forceLink().id(d => d.id).distance(120))
-            .force('charge', d3.forceManyBody().strength(-300))
+            .force('link', d3.forceLink().id(d => d.id)
+                .distance(d => d.type === 'bootstrap' ? 120 : 180)
+                .strength(d => d.type === 'bootstrap' ? 0.7 : 0.1))
+            .force('charge', d3.forceManyBody().strength(-400))
             .force('center', d3.forceCenter(width / 2, height / 2))
-            .force('collision', d3.forceCollide().radius(35));
+            .force('collision', d3.forceCollide().radius(40));
     }
 
     async _loadNetworkData() {
@@ -231,18 +241,23 @@ export class NetworkViz {
             });
         });
 
-        // Build links: star topology with primary/bootstrap as hub
-        // This reflects the actual bootstrap connection pattern
-        const primary = this.nodes.find(n => n.isPrimary) || this.nodes.find(n => n.id === 'node0');
-        if (primary) {
-            this.nodes.forEach(node => {
-                if (node.id !== primary.id && (node.isRunning || node.isStarting)) {
-                    this.links.push({
-                        source: primary.id,
-                        target: node.id,
-                    });
-                }
-            });
+        // Build links: full mesh between all active nodes (reflects actual DHT discovery)
+        // After bootstrap, Kademlia DHT connects every node to every other node.
+        const activeNodes = this.nodes.filter(n => n.isRunning || n.isStarting);
+        const primaryId = (this.nodes.find(n => n.isPrimary) || this.nodes.find(n => n.id === 'node0'))?.id;
+
+        for (let i = 0; i < activeNodes.length; i++) {
+            for (let j = i + 1; j < activeNodes.length; j++) {
+                const a = activeNodes[i].id;
+                const b = activeNodes[j].id;
+                // Bootstrap links: initial connection to/from the bootstrap node
+                const isBootstrap = (a === primaryId || b === primaryId);
+                this.links.push({
+                    source: a,
+                    target: b,
+                    type: isBootstrap ? 'bootstrap' : 'mesh',
+                });
+            }
         }
 
         // Update node count display
@@ -333,14 +348,15 @@ export class NetworkViz {
             return;
         }
 
-        // Create links
+        // Create links (bootstrap = solid, mesh/DHT = dashed)
         const link = this.g.append('g')
             .selectAll('line')
             .data(this.links)
             .enter().append('line')
-            .attr('stroke', '#1D9BF0')
-            .attr('stroke-opacity', 0.45)
-            .attr('stroke-width', 2);
+            .attr('stroke', d => d.type === 'bootstrap' ? '#1D9BF0' : '#71767B')
+            .attr('stroke-opacity', d => d.type === 'bootstrap' ? 0.5 : 0.25)
+            .attr('stroke-width', d => d.type === 'bootstrap' ? 2 : 1)
+            .attr('stroke-dasharray', d => d.type === 'mesh' ? '4 3' : 'none');
 
         // Create node groups
         const node = this.g.append('g')
