@@ -114,7 +114,6 @@ export class NodeManager {
         `;
 
         this.setupEventListeners();
-        this.setupWSHandlers();
         this.updateSupervisorModeAlert();
         await this.loadNodes();
     }
@@ -140,22 +139,6 @@ export class NodeManager {
             if (e.target.id === 'start-node-modal') {
                 this.hideStartNodeModal();
             }
-        });
-    }
-
-    setupWSHandlers() {
-        this.ws.on('node_status', (data) => {
-            this.updateNodeStatus(data.node_id, data.status, data.node);
-        });
-
-        this.ws.on('node_output', (data) => {
-            if (this.selectedNodeId === data.node_id) {
-                this.appendLog(data.line);
-            }
-        });
-
-        this.ws.on('cluster_status', (data) => {
-            this.handleClusterStatus(data);
         });
     }
 
