@@ -14,9 +14,9 @@ export class TicketManager {
             <div class="page-header">
                 <h2 class="page-title">Ticket Management</h2>
                 <p class="page-description">Validate, consume, and manage tickets</p>
-                <div style="display: flex; gap: 0.5rem; margin-top: 0.5rem;">
+                <div class="page-header-actions">
                     <button class="btn btn-secondary" id="seed-tickets-btn">Seed 500 Tickets</button>
-                    <span id="seed-result" style="align-self: center;"></span>
+                    <span id="seed-result"></span>
                 </div>
             </div>
 
@@ -50,9 +50,9 @@ export class TicketManager {
             <div class="card">
                 <div class="card-header">
                     <h3 class="card-title">All Tickets</h3>
-                    <div style="display: flex; gap: 1rem; align-items: center;">
-                        <input type="text" id="ticket-search" class="form-input" placeholder="Search tickets..." style="width: 200px;">
-                        <select id="ticket-filter" class="form-select" style="width: 150px;">
+                    <div class="filter-bar">
+                        <input type="text" id="ticket-search" class="form-input" placeholder="Search tickets...">
+                        <select id="ticket-filter" class="form-select">
                             <option value="all">All States</option>
                             <option value="ISSUED">Issued</option>
                             <option value="VALIDATED">Validated</option>
@@ -106,10 +106,10 @@ export class TicketManager {
         try {
             const result = await this.api.seedTickets();
             const totalSeeded = result?.total_seeded ?? result?.seeded ?? 0;
-            resultSpan.innerHTML = `<span class="alert alert-success" style="padding: 0.25rem 0.5rem;">Seeded ${totalSeeded} tickets</span>`;
+            resultSpan.innerHTML = `<span class="inline-feedback success">Seeded ${totalSeeded} tickets</span>`;
             await this.loadTickets();
         } catch (error) {
-            resultSpan.innerHTML = `<span class="alert alert-error" style="padding: 0.25rem 0.5rem;">Error: ${error.message}</span>`;
+            resultSpan.innerHTML = `<span class="inline-feedback error">Error: ${error.message}</span>`;
         } finally {
             btn.disabled = false;
             btn.textContent = 'Seed 500 Tickets';
@@ -212,9 +212,11 @@ export class TicketManager {
                             <td class="font-mono">${ticket.ValidatorID || '-'}</td>
                             <td>${this.formatTimestamp(ticket.Timestamp)}</td>
                             <td>
-                                ${ticket.State === 'ISSUED' ? '<button class="btn btn-sm btn-primary" onclick="window.app.modules.tickets.quickValidate(\'' + ticket.ID + '\')">Validate</button>' : ''}
-                                ${ticket.State === 'VALIDATED' ? '<button class="btn btn-sm btn-primary" onclick="window.app.modules.tickets.consumeTicket(\'' + ticket.ID + '\')">Consume</button>' : ''}
-                                ${ticket.State !== 'DISPUTED' && ticket.State !== 'ISSUED' ? '<button class="btn btn-sm btn-error" onclick="window.app.modules.tickets.disputeTicket(\'' + ticket.ID + '\')">Dispute</button>' : ''}
+                                <div class="ticket-actions">
+                                    ${ticket.State === 'ISSUED' ? '<button class="btn btn-sm btn-primary" onclick="window.app.modules.tickets.quickValidate(\'' + ticket.ID + '\')">Validate</button>' : ''}
+                                    ${ticket.State === 'VALIDATED' ? '<button class="btn btn-sm btn-primary" onclick="window.app.modules.tickets.consumeTicket(\'' + ticket.ID + '\')">Consume</button>' : ''}
+                                    ${ticket.State !== 'DISPUTED' && ticket.State !== 'ISSUED' ? '<button class="btn btn-sm btn-danger" onclick="window.app.modules.tickets.disputeTicket(\'' + ticket.ID + '\')">Dispute</button>' : ''}
+                                </div>
                             </td>
                         </tr>
                     `).join('')}
