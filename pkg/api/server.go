@@ -2,9 +2,11 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +25,7 @@ type Server struct {
 	broadcast   chan interface{}
 	ctx         context.Context
 	cancel      context.CancelFunc
+	apiKey      string
 }
 
 // ValidatorInterface defines the interface for validator operations
@@ -40,9 +43,10 @@ type ValidatorInterface interface {
 
 // Config holds API server configuration
 type Config struct {
-	Address   string
-	Port      int
+	Address    string
+	Port       int
 	EnableCORS bool
+	APIKey     string // Optional API key for authentication (empty = no auth)
 }
 
 // Request/Response structures
@@ -83,6 +87,7 @@ func NewServer(ctx context.Context, cfg *Config, validator ValidatorInterface) (
 		broadcast: make(chan interface{}, 100),
 		ctx:       serverCtx,
 		cancel:    cancel,
+		apiKey:    cfg.APIKey,
 	}
 
 	// Setup routes
@@ -135,6 +140,9 @@ func (s *Server) setupRoutes() {
 	s.router.Use(s.loggingMiddleware)
 	if s.wsUpgrader.CheckOrigin != nil {
 		s.router.Use(s.corsMiddleware)
+	}
+	if s.apiKey != "" {
+		s.router.Use(s.apiKeyMiddleware)
 	}
 }
 
@@ -368,10 +376,41 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// apiKeyMiddleware enforces API key authentication when an API key is configured.
+// Exempt paths: /health, /ws, and static files (non-/api/ paths).
+func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Exempt health check, WebSocket, and static file paths
+		if path == "/health" || path == "/ws" || !strings.HasPrefix(path, "/api/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check X-API-Key header first, then Authorization: Bearer
+		key := r.Header.Get("X-API-Key")
+		if key == "" {
+			auth := r.Header.Get("Authorization")
+			if strings.HasPrefix(auth, "Bearer ") {
+				key = strings.TrimPrefix(auth, "Bearer ")
+			}
+		}
+
+		// Constant-time comparison to prevent timing attacks
+		if subtle.ConstantTimeCompare([]byte(key), []byte(s.apiKey)) != 1 {
+			s.sendError(w, http.StatusUnauthorized, "Invalid or missing API key")
 			return
 		}
 
