@@ -106,6 +106,7 @@ type NodeManager struct {
 	basePort        int
 	baseAPIPort     int
 	totalNodes      int
+	apiKey          string
 	mu              sync.RWMutex
 	outputCallback  func(nodeID string, line string)
 	statusCallback  func(nodeID string, status NodeStatus)
@@ -120,6 +121,7 @@ type NodeManagerConfig struct {
 	DataDir         string
 	BasePort        int
 	BaseAPIPort     int
+	APIKey          string
 	OutputCallback  func(nodeID string, line string)
 	StatusCallback  func(nodeID string, status NodeStatus)
 	ClusterCallback func(status ClusterStatus, nodesStarted int, nodesTotal int)
@@ -143,6 +145,7 @@ func NewNodeManager(cfg *NodeManagerConfig) *NodeManager {
 		dataDir:         cfg.DataDir,
 		basePort:        cfg.BasePort,
 		baseAPIPort:     cfg.BaseAPIPort,
+		apiKey:          cfg.APIKey,
 		outputCallback:  cfg.OutputCallback,
 		statusCallback:  cfg.StatusCallback,
 		clusterCallback: cfg.ClusterCallback,
@@ -248,6 +251,11 @@ func (m *NodeManager) startNodeProcess(node *ManagedNode, bootstrapAddr string) 
 		if cwd, err := os.Getwd(); err == nil {
 			cmd.Dir = cwd
 		}
+	}
+
+	// Pass API key to child process via environment variable (avoids exposing in ps output)
+	if m.apiKey != "" {
+		cmd.Env = append(os.Environ(), fmt.Sprintf("DTVN_API_KEY=%s", m.apiKey))
 	}
 
 	// Capture stdout and stderr
