@@ -15,7 +15,8 @@
     /* Colors - UI Elements */
     --color-bg: #000000;
     --color-card-bg: #16181C;
-    --color-surface-raised: #1D1F23;
+    --color-surface-raised: #202327;
+    --color-surface-overlay: #2C2F33;
     --color-border: #2F3336;
     --color-text: #E7E9EA;
     --color-text-secondary: #71767B;
@@ -36,7 +37,8 @@
     --spacing-xl: 2rem;
 
     /* Border radius — rounded, X-style */
-    --radius-sm: 4px;
+    --radius-xs: 4px;
+    --radius-sm: 8px;
     --radius-md: 12px;
     --radius-lg: 16px;
     --radius-full: 9999px;
@@ -47,6 +49,7 @@
     --shadow-lg: 0 4px 16px rgba(0, 0, 0, 0.6);
 
     /* Transitions */
+    --transition-micro: 100ms ease;
     --transition-fast: 150ms ease-in-out;
     --transition-normal: 250ms ease-in-out;
 }
@@ -208,8 +211,8 @@ body {
     padding: var(--spacing-lg);
 }
 
-/* Loading spinner */
-.loading {
+/* Initial app load spinner (scoped to avoid conflicts with components.css) */
+#content-area > .loading {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -254,6 +257,25 @@ body {
     gap: var(--spacing-md);
     animation: slideIn 0.3s ease-out;
     font-size: 0.875rem;
+    position: relative;
+    overflow: hidden;
+}
+
+.toast::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 2px;
+    width: 100%;
+    background-color: currentColor;
+    opacity: 0.3;
+    animation: toast-progress 5s linear forwards;
+}
+
+@keyframes toast-progress {
+    from { width: 100%; }
+    to { width: 0%; }
 }
 
 .toast.success {
