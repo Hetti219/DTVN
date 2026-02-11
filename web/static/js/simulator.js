@@ -154,7 +154,6 @@ export class Simulator {
         `;
 
         this.setupEventListeners();
-        this.setupWSHandlers();
 
         // Load current state if available
         await this.loadCurrentState();
@@ -176,24 +175,6 @@ export class Simulator {
         // Byzantine validation
         document.getElementById('sim-nodes').addEventListener('input', () => this.validateByzantine());
         document.getElementById('sim-byzantine').addEventListener('input', () => this.validateByzantine());
-    }
-
-    setupWSHandlers() {
-        this.ws.on('simulator_status', (data) => {
-            this.updateStatus(data.status);
-        });
-
-        this.ws.on('simulator_progress', (data) => {
-            this.updateProgress(data.progress);
-        });
-
-        this.ws.on('simulator_output', (data) => {
-            this.appendOutput(data.line);
-        });
-
-        this.ws.on('simulator_results', (data) => {
-            this.showResults(data.results);
-        });
     }
 
     async checkSupervisorMode() {
