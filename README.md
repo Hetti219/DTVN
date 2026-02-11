@@ -1,195 +1,218 @@
-# Distributed Ticket Validation Network (DTVN)
+# DTVN - Distributed Ticket Validation Network
 
-A Byzantine Fault-Tolerant, peer-to-peer ticket validation system using gossip-based consensus protocols.
+A Byzantine Fault-Tolerant, peer-to-peer ticket validation system built with Go. DTVN uses PBFT consensus, gossip-based message dissemination, and libp2p networking to validate and track event tickets across a decentralized network of validator nodes — with no centralized infrastructure.
 
-## Overview
+The system tolerates up to `f` Byzantine (malicious) nodes where `f = (n-1)/3` and `n` is the total number of validators.
 
-DTVN is a decentralized network for validating and tracking event tickets using:
-- **libp2p** for P2P networking
-- **Kademlia DHT** for peer discovery
-- **Gossip Protocol** for epidemic message dissemination
-- **PBFT** (Practical Byzantine Fault Tolerance) for consensus
-- **Vector Clocks** for causality tracking
-- **BoltDB** for persistent storage
+## Table of Contents
 
-The system can tolerate up to `f` Byzantine (malicious) nodes where `f = (n-1)/3` and `n` is the total number of validator nodes.
+- [Features](#features)
+- [Architecture](#architecture)
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Quick Start](#quick-start)
+- [Supervisor Dashboard](#supervisor-dashboard)
+- [Running a Validator Network Manually](#running-a-validator-network-manually)
+- [Network Simulator](#network-simulator)
+- [API Reference](#api-reference)
+- [WebSocket Events](#websocket-events)
+- [Configuration](#configuration)
+- [Byzantine Fault Tolerance](#byzantine-fault-tolerance)
+- [Monitoring](#monitoring)
+- [Testing](#testing)
+- [CI/CD](#cicd)
+- [Project Structure](#project-structure)
+- [Performance](#performance)
+- [Troubleshooting](#troubleshooting)
+- [License](#license)
+- [Contributing](#contributing)
+- [References](#references)
+
+## Features
+
+- **Fully decentralized** — no central server, all nodes are equal peers
+- **PBFT consensus** — three-phase commit (Pre-Prepare, Prepare, Commit) for ticket state agreement
+- **Gossip protocol** — epidemic broadcast with anti-entropy for message dissemination and state reconciliation
+- **libp2p networking** — TCP transport, Kademlia DHT peer discovery, secure channels, NAT traversal
+- **Vector clocks** — causality tracking and conflict resolution for concurrent ticket updates
+- **BoltDB persistence** — embedded key-value storage with atomic transactions
+- **Web dashboard** — supervisor UI for managing nodes, viewing network topology, and monitoring metrics
+- **Network simulator** — test Byzantine behavior, network partitions, and consensus performance
+- **Prometheus metrics** — consensus latency, gossip throughput, peer counts, ticket operations
+- **REST API + WebSocket** — per-node HTTP API and real-time event streaming
 
 ## Architecture
 
-### Layer 0: P2P Infrastructure
-- libp2p networking with multiple transports (TCP, QUIC, WebSocket)
-- NAT traversal and hole punching
-- Secure communication with TLS and Noise
-- Connection multiplexing
+DTVN is organized into layers, each building on the one below:
 
-### Layer 1: Peer Discovery
-- Kademlia DHT for distributed peer discovery
-- Bootstrap nodes for network bootstrapping
-- Automatic peer discovery and connection management
+```
+Layer 6: API           REST endpoints + WebSocket (per-node)
+Layer 5: Storage       BoltDB persistence (tickets, consensus log, checkpoints)
+Layer 4: State         Ticket state machine + vector clocks
+Layer 3: Consensus     PBFT (3-phase commit, view changes, checkpointing)
+Layer 2: Gossip        Epidemic broadcast, anti-entropy, Bloom filter deduplication
+Layer 1: Discovery     Kademlia DHT, bootstrap nodes
+Layer 0: P2P           libp2p (TCP, TLS/Noise, connection multiplexing)
+```
 
-### Layer 2: Gossip Protocol
-- Epidemic broadcast for message dissemination
-- Anti-entropy for state reconciliation
-- Bloom filters for message deduplication
-- Dynamic fanout adjustment (sqrt(n))
+### Ticket Lifecycle
 
-### Layer 3: Consensus (PBFT)
-- Three-phase commit protocol (Pre-Prepare, Prepare, Commit)
-- View change for leader election
-- Checkpointing for garbage collection
-- Byzantine fault tolerance (tolerates f < n/3 failures)
+Tickets follow a strict state machine:
 
-### Layer 4: State Machine
-- Ticket state transitions (ISSUED → VALIDATED → CONSUMED)
-- Vector clocks for causality tracking
-- Conflict resolution for concurrent updates
-- State merging and synchronization
+```bash
+ISSUED ──→ VALIDATED ──→ CONSUMED
+                │
+                └──→ DISPUTED
+```
 
-### Layer 5: Storage
-- BoltDB for persistent key-value storage
-- Separate buckets for tickets, consensus logs, and checkpoints
-- Atomic transactions
-- Database backup and compaction
+- **ISSUED** — ticket created/seeded, awaiting validation
+- **VALIDATED** — ticket passed PBFT consensus across the network
+- **CONSUMED** — ticket used at the event gate
+- **DISPUTED** — ticket flagged for review
 
-### Layer 6: API
-- REST API for ticket operations
-- WebSocket for real-time updates
-- Prometheus metrics endpoint
-- CORS support
+State transitions are enforced by the state machine. Validation requires PBFT consensus (2f+1 agreement).
+
+### Message Flow
+
+1. Client sends `POST /api/v1/tickets/validate` to any node
+2. Non-primary nodes forward the request via gossip to all peers
+3. The primary node initiates PBFT consensus:
+   - **Pre-Prepare** → **Prepare** (wait for 2f+1) → **Commit** (wait for 2f+1) → **Execute**
+4. After 2f+1 commits, each node applies the state change locally
+5. Anti-entropy (every 5s) ensures eventual consistency across all nodes
+
+## Prerequisites
+
+- **Go 1.25+**
+- **Make** (for build automation)
+- **protoc** (optional, only needed if modifying protocol buffer definitions)
 
 ## Installation
 
-### Prerequisites
-- Go 1.21 or higher
-- protoc (optional, for protocol buffer generation)
-
-### Building from Source
-
 ```bash
 # Clone the repository
-git clone https://github.com/Hetti219/distributed-ticket-validation.git
-cd distributed-ticket-validation
+git clone https://github.com/Hetti219/DTVN.git
+cd DTVN
 
 # Install dependencies
 go mod download
 
-# Build binaries
+# Build all binaries (validator, simulator, supervisor)
 make build
-
-# Or build manually
-go build -o bin/validator cmd/validator/main.go
-go build -o bin/simulator cmd/simulator/main.go
 ```
+
+This produces three binaries in `bin/`:
+
+- `bin/validator` — a single validator node
+- `bin/simulator` — network simulation tool
+- `bin/supervisor` — web dashboard for managing a cluster
 
 ## Quick Start
 
-### Running a Single Validator Node
+The fastest way to get started is with the supervisor dashboard:
 
 ```bash
-# Run the primary validator node
+make build
+./bin/supervisor
+```
+
+Open http://localhost:8080 in your browser. From the dashboard you can:
+
+- Start/stop a cluster of validator nodes
+- Seed test tickets and validate/consume/dispute them
+- View the network topology graph
+- Run the Byzantine fault tolerance simulator
+- Monitor real-time metrics and node logs
+
+## Supervisor Dashboard
+
+The supervisor is a separate process that manages validator node subprocesses and provides a web UI.
+
+### CLI Flags
+
+| Flag          | Default       | Description                                  |
+| ------------- | ------------- | -------------------------------------------- |
+| `-web-port`   | `8080`        | Web interface port                           |
+| `-web-addr`   | `0.0.0.0`     | Web interface bind address                   |
+| `-data-dir`   | `./data`      | Data directory for node databases            |
+| `-validator`  | auto-detected | Path to validator binary                     |
+| `-simulator`  | auto-detected | Path to simulator binary                     |
+| `-static-dir` | auto-detected | Path to static web files                     |
+| `-auto-start` | `0`           | Auto-start N nodes on startup (0 = disabled) |
+
+### Dashboard Pages
+
+- **Dashboard** — cluster overview, quick actions (start cluster, seed tickets, validate)
+- **Nodes** — start/stop/restart individual nodes, view logs
+- **Tickets** — browse all tickets, validate/consume/dispute actions
+- **Network** — D3.js force-directed graph of the P2P mesh topology
+- **Metrics** — Chart.js graphs of consensus latency, ticket throughput, gossip stats
+- **Simulator** — configure and run Byzantine fault tolerance simulations
+
+## Running a Validator Network Manually
+
+### Single Node
+
+```bash
 ./bin/validator \
-  -id validator-0 \
+  -id node0 \
   -port 4001 \
-  -api-port 8080 \
-  -data-dir ./data/validator-0 \
+  -api-port 8081 \
+  -data-dir ./data/node0 \
   -primary \
   -total-nodes 4
 ```
 
-### Running a Network of Validators
+### Multi-Node Network
 
-Using the Makefile:
-```bash
-make run-network
-```
+Peer IDs are deterministic based on node ID. `node0` always has peer ID `12D3KooWLtBkKrip2jyaRzhUphqYyVXGUPMMbmpBWHZMYXaueb9C`.
 
-Or manually (peer IDs are deterministic based on node ID):
 ```bash
 # Terminal 1: Primary node
-./bin/validator -id node0 -port 4001 -api-port 8081 -data-dir ./data/node0 -primary -total-nodes 4
+./bin/validator -id node0 -port 4001 -api-port 8081 -data-dir ./data/node0 \
+  -primary -total-nodes 4
 
-# Terminal 2: Validator node 1 (node0's peer ID is deterministic)
-./bin/validator -id node1 -port 4002 -api-port 8082 -data-dir ./data/node1 -total-nodes 4 \
+# Terminal 2: Validator node 1
+./bin/validator -id node1 -port 4002 -api-port 8082 -data-dir ./data/node1 \
+  -total-nodes 4 \
   -bootstrap "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWLtBkKrip2jyaRzhUphqYyVXGUPMMbmpBWHZMYXaueb9C"
 
 # Terminal 3: Validator node 2
-./bin/validator -id node2 -port 4003 -api-port 8083 -data-dir ./data/node2 -total-nodes 4 \
+./bin/validator -id node2 -port 4003 -api-port 8083 -data-dir ./data/node2 \
+  -total-nodes 4 \
   -bootstrap "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWLtBkKrip2jyaRzhUphqYyVXGUPMMbmpBWHZMYXaueb9C"
 
 # Terminal 4: Validator node 3
-./bin/validator -id node3 -port 4004 -api-port 8084 -data-dir ./data/node3 -total-nodes 4 \
+./bin/validator -id node3 -port 4004 -api-port 8084 -data-dir ./data/node3 \
+  -total-nodes 4 \
   -bootstrap "/ip4/127.0.0.1/tcp/4001/p2p/12D3KooWLtBkKrip2jyaRzhUphqYyVXGUPMMbmpBWHZMYXaueb9C"
 ```
 
-## API Usage
-
-### Validate a Ticket
+Or use the Makefile shortcut:
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/tickets/validate \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ticket_id": "TICKET-001",
-    "data": "eyJldmVudCI6IkNvbmNlcnQiLCJzZWF0IjoiQTEifQ=="
-  }'
+make run-network    # Starts a 4-node network (node0-node3)
 ```
 
-### Consume a Ticket
+### Validator CLI Flags
 
-```bash
-curl -X POST http://localhost:8080/api/v1/tickets/consume \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ticket_id": "TICKET-001"
-  }'
-```
-
-### Dispute a Ticket
-
-```bash
-curl -X POST http://localhost:8080/api/v1/tickets/dispute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "ticket_id": "TICKET-001"
-  }'
-```
-
-### Get Ticket Status
-
-```bash
-curl http://localhost:8080/api/v1/tickets/TICKET-001
-```
-
-### Get All Tickets
-
-```bash
-curl http://localhost:8080/api/v1/tickets
-```
-
-### Get Node Stats
-
-```bash
-curl http://localhost:8080/api/v1/stats
-```
-
-### WebSocket Connection
-
-```javascript
-const ws = new WebSocket('ws://localhost:8080/ws');
-
-ws.onmessage = (event) => {
-  const update = JSON.parse(event.data);
-  console.log('Ticket update:', update);
-};
-```
+| Flag              | Default  | Description                                    |
+| ----------------- | -------- | ---------------------------------------------- |
+| `-id`             | `node0`  | Node identifier                                |
+| `-port`           | `4001`   | P2P listen port                                |
+| `-api-port`       | `8080`   | REST API server port                           |
+| `-data-dir`       | `./data` | Data directory for BoltDB storage              |
+| `-bootstrap`      | —        | Comma-separated bootstrap peer multiaddrs      |
+| `-bootstrap-node` | `false`  | Run as a bootstrap-only node                   |
+| `-primary`        | `false`  | Run as the primary (leader) node               |
+| `-total-nodes`    | `4`      | Total number of validator nodes in the network |
 
 ## Network Simulator
 
-The simulator allows testing of Byzantine fault tolerance, network partitions, and consensus performance.
-
-### Basic Simulation
+The simulator tests Byzantine fault tolerance, network partitions, and consensus performance in a controlled environment.
 
 ```bash
+# Basic simulation: 7 nodes, 2 Byzantine, 100 tickets
 ./bin/simulator \
   -nodes 7 \
   -byzantine 2 \
@@ -197,11 +220,8 @@ The simulator allows testing of Byzantine fault tolerance, network partitions, a
   -duration 60s \
   -latency 50ms \
   -packet-loss 0.01
-```
 
-### Simulation with Network Partitions
-
-```bash
+# With network partitions
 ./bin/simulator \
   -nodes 7 \
   -byzantine 2 \
@@ -212,62 +232,174 @@ The simulator allows testing of Byzantine fault tolerance, network partitions, a
   -partition
 ```
 
-### Simulator Options
-
-- `-nodes`: Number of validator nodes (default: 7)
-- `-byzantine`: Number of Byzantine (malicious) nodes (default: 2, must be < n/3)
-- `-tickets`: Number of tickets to simulate (default: 100)
-- `-duration`: Simulation duration (default: 60s)
-- `-latency`: Network latency (default: 50ms)
-- `-packet-loss`: Packet loss rate 0.0-1.0 (default: 0.01)
-- `-partition`: Enable network partitions (default: false)
-
-## Monitoring
-
-### Prometheus Metrics
-
-Metrics are exposed at `http://localhost:9090/metrics`:
-
-- **Consensus Metrics**: rounds, success/failure, latency
-- **Gossip Metrics**: messages sent/received, cache hits/misses
-- **Network Metrics**: peer count, bandwidth
-- **Ticket Metrics**: validated, consumed, disputed counts
-- **Storage Metrics**: operation counts and latency
-- **API Metrics**: request counts and latency
-
-### Grafana Dashboards
-
-Access Grafana at `http://localhost:3000` (admin/admin)
-
-Pre-configured dashboards show:
-- Network topology
-- Consensus performance
-- Ticket throughput
-- Node health status
-
-## Testing
-
-### Run Unit Tests
+Or via the Makefile:
 
 ```bash
-make test
+make run-simulator            # Standard simulation
+make run-simulator-partition  # Simulation with network partitions
 ```
 
-### Run with Coverage
+### Simulator Flags
+
+| Flag           | Default | Description                                           |
+| -------------- | ------- | ----------------------------------------------------- |
+| `-nodes`       | `7`     | Number of validator nodes                             |
+| `-byzantine`   | `2`     | Number of Byzantine (malicious) nodes (must be < n/3) |
+| `-tickets`     | `100`   | Number of tickets to simulate                         |
+| `-duration`    | `60s`   | Simulation duration                                   |
+| `-latency`     | `50ms`  | Simulated network latency                             |
+| `-packet-loss` | `0.01`  | Packet loss rate (0.0–1.0)                            |
+| `-partition`   | `false` | Enable network partition simulation                   |
+
+## API Reference
+
+Each validator node exposes a REST API. When using the supervisor, these endpoints are proxied through the supervisor's single port.
+
+### Ticket Operations
+
+**Seed test tickets**
 
 ```bash
-make test-coverage
+curl -X POST http://localhost:8081/api/v1/tickets/seed
 ```
 
-### Integration Tests
+Seeds 500 deterministic tickets in ISSUED state.
+
+**Validate a ticket**
 
 ```bash
-go test -v ./test/integration/...
+curl -X POST http://localhost:8081/api/v1/tickets/validate \
+  -H "Content-Type: application/json" \
+  -d '{"ticket_id": "TICKET-001", "data": "eyJldmVudCI6IkNvbmNlcnQifQ=="}'
 ```
+
+**Consume a ticket**
+
+```bash
+curl -X POST http://localhost:8081/api/v1/tickets/consume \
+  -H "Content-Type: application/json" \
+  -d '{"ticket_id": "TICKET-001"}'
+```
+
+**Dispute a ticket**
+
+```bash
+curl -X POST http://localhost:8081/api/v1/tickets/dispute \
+  -H "Content-Type: application/json" \
+  -d '{"ticket_id": "TICKET-001"}'
+```
+
+**Get a ticket**
+
+```bash
+curl http://localhost:8081/api/v1/tickets/TICKET-001
+```
+
+**Get all tickets**
+
+```bash
+curl http://localhost:8081/api/v1/tickets
+```
+
+### Node Info
+
+**Node statistics**
+
+```bash
+curl http://localhost:8081/api/v1/stats
+```
+
+Returns: `node_id`, `peer_count`, `is_primary`, `current_view`, `sequence`, `cache_size`, `storage_stats`.
+
+**Connected peers**
+
+```bash
+curl http://localhost:8081/api/v1/peers
+```
+
+**Node configuration**
+
+```bash
+curl http://localhost:8081/api/v1/config
+```
+
+**API status**
+
+```bash
+curl http://localhost:8081/api/v1/status
+```
+
+**Health check**
+
+```bash
+curl http://localhost:8081/health
+```
+
+### Supervisor-Only Endpoints
+
+When using the supervisor dashboard, additional management endpoints are available:
+
+| Method   | Endpoint                         | Description             |
+| -------- | -------------------------------- | ----------------------- |
+| `GET`    | `/api/v1/nodes`                  | List all nodes          |
+| `POST`   | `/api/v1/nodes`                  | Start a new node        |
+| `GET`    | `/api/v1/nodes/{nodeID}`         | Get node details        |
+| `DELETE` | `/api/v1/nodes/{nodeID}`         | Stop a node             |
+| `POST`   | `/api/v1/nodes/{nodeID}/restart` | Restart a node          |
+| `GET`    | `/api/v1/nodes/{nodeID}/logs`    | Get node logs           |
+| `POST`   | `/api/v1/cluster/start`          | Start a cluster (async) |
+| `POST`   | `/api/v1/cluster/stop`           | Stop all nodes          |
+| `GET`    | `/api/v1/simulator`              | Get simulator status    |
+| `POST`   | `/api/v1/simulator/start`        | Start simulator         |
+| `POST`   | `/api/v1/simulator/stop`         | Stop simulator          |
+| `GET`    | `/api/v1/simulator/output`       | Get simulator output    |
+| `GET`    | `/api/v1/simulator/results`      | Get simulator results   |
+
+## WebSocket Events
+
+Connect to `ws://localhost:8081/ws` (validator) or `ws://localhost:8080/ws` (supervisor) for real-time updates.
+
+```javascript
+const ws = new WebSocket("ws://localhost:8080/ws");
+
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  console.log(msg.type, msg);
+};
+```
+
+### Validator Events
+
+| Event              | Description                          |
+| ------------------ | ------------------------------------ |
+| `ticket_validated` | A ticket was validated via consensus |
+| `ticket_consumed`  | A ticket was consumed                |
+| `ticket_disputed`  | A ticket was disputed                |
+| `tickets_seeded`   | Test tickets were seeded             |
+
+### Supervisor Events
+
+| Event                | Description                                                     |
+| -------------------- | --------------------------------------------------------------- |
+| `connected`          | Initial connection (includes current node list, cluster status) |
+| `node_status`        | Node started/stopped/errored                                    |
+| `node_output`        | Console output from a node process                              |
+| `cluster_status`     | Cluster startup progress (`nodes_started` / `nodes_total`)      |
+| `simulator_status`   | Simulator started/stopped                                       |
+| `simulator_output`   | Console output from the simulator                               |
+| `simulator_progress` | Simulation progress update                                      |
+| `simulator_results`  | Final simulation results                                        |
+| `ticket_validated`   | Proxied ticket validation event                                 |
+| `ticket_consumed`    | Proxied ticket consumption event                                |
+| `ticket_disputed`    | Proxied ticket dispute event                                    |
+| `tickets_seeded`     | Proxied ticket seeding event                                    |
+| `pong`               | Keep-alive response                                             |
 
 ## Configuration
 
-Edit `config/validator.yaml` to customize:
+### Validator Config File
+
+Edit `config/validator.yaml`:
 
 ```yaml
 node:
@@ -276,131 +408,240 @@ node:
 
 network:
   listen_port: 4001
+  bootstrap_mode: false
   bootstrap_peers:
     - "/ip4/127.0.0.1/tcp/4000/p2p/..."
 
+api:
+  address: "0.0.0.0"
+  port: 8080
+  enable_cors: true
+
 consensus:
+  is_primary: false
   total_nodes: 7
   view_timeout: 5s
+  checkpoint_interval: 100
 
 gossip:
   fanout: 3
   ttl: 10
+  cache_size: 10000
+  anti_entropy_interval: 5s
+
+storage:
+  type: "boltdb"
+  path: "./data/validator-1/db"
+  timeout: 10s
+
+metrics:
+  enabled: true
+  address: "0.0.0.0"
+  port: 9090
+
+logging:
+  level: "info"
+  format: "json"
+  output: "stdout"
 ```
+
+### Prometheus Config
+
+A sample Prometheus scrape configuration is provided in `config/prometheus.yml` for monitoring validator nodes.
 
 ## Byzantine Fault Tolerance
 
-The system tolerates up to `f` Byzantine nodes where:
-- `f = (n - 1) / 3`
-- Minimum network size: 4 nodes (tolerates 1 Byzantine node)
-- Recommended: 7 nodes (tolerates 2 Byzantine nodes)
+The system uses PBFT to tolerate Byzantine (arbitrarily malicious) nodes. The tolerance formula is:
 
-### Valid Network Sizes
+```go
+f = (n - 1) / 3
+```
 
-- 4 nodes → tolerates 1 Byzantine node
-- 7 nodes → tolerates 2 Byzantine nodes
-- 10 nodes → tolerates 3 Byzantine nodes
-- 13 nodes → tolerates 4 Byzantine nodes
+where `f` is the maximum number of Byzantine nodes tolerated and `n` is the total node count.
+
+| Nodes (n) | Byzantine Tolerance (f) | Quorum Required (2f+1) |
+| --------- | ----------------------- | ---------------------- |
+| 4         | 1                       | 3                      |
+| 7         | 2                       | 5                      |
+| 10        | 3                       | 7                      |
+| 13        | 4                       | 9                      |
+
+**Minimum network size:** 4 nodes (tolerates 1 Byzantine node).
+
+### PBFT Protocol
+
+- **Primary election:** `primary = view % totalNodes`
+- **View changes:** triggered on 15s timeout if consensus stalls
+- **Checkpointing:** every 10 consensus operations for garbage collection
+- **Sequence numbers:** monotonically increasing; gaps block consensus until recovered via anti-entropy
+
+## Monitoring
+
+### Prometheus Metrics
+
+Each validator exposes metrics at its configured metrics port (default `9090`):
+
+- **Consensus** — rounds total, success/failure counts, latency histogram
+- **Gossip** — messages sent/received, cache size, hits/misses
+- **Network** — peer count, message count, bytes transmitted
+- **Tickets** — validated/consumed/disputed counters, state gauges
+- **Storage** — operation counts, latency histograms
+- **API** — request counts, latency histograms, WebSocket connection count
+
+## Testing
+
+```bash
+# Run all tests
+make test
+
+# Unit tests only (fast)
+make test-unit
+
+# Tests with HTML coverage report (opens coverage.html)
+make test-coverage
+
+# Integration tests
+make test-integration
+
+# Run a specific test
+go test -v -run TestSpecificFunction ./pkg/consensus/
+
+# Run a specific integration test
+make test-integration-single TEST=TestSingleTicketValidation
+```
+
+### Integration Test Options
+
+The integration test runner (`scripts/run-integration-tests.sh`) supports:
+
+| Flag                 | Description                       |
+| -------------------- | --------------------------------- |
+| `-p`                 | Run tests in parallel             |
+| `-v`                 | Verbose output                    |
+| `--no-cleanup`       | Keep test artifacts for debugging |
+| `--pattern PATTERN`  | Run only matching test names      |
+| `--timeout DURATION` | Override default 30m timeout      |
+
+## CI/CD
+
+### Continuous Integration
+
+Every push and pull request to `main` triggers the CI pipeline (`.github/workflows/go-ci.yml`):
+
+1. Checkout code
+2. Set up Go 1.25.5
+3. Download dependencies
+4. Build all binaries (`make build`)
+5. Run all tests (`make test`)
+
+### Releases
+
+Pushing a version tag (`v*`) triggers the release pipeline (`.github/workflows/release.yml`):
+
+- Builds `dtvn-validator` and `dtvn-simulator` for Linux amd64/arm64
+- Signs artifacts with Cosign
+- Generates SBOMs with Syft
+- Creates a GitHub Release with changelog (grouped by category)
+
+## Project Structure
+
+```bash
+.
+├── cmd/
+│   ├── validator/          # Validator node entry point
+│   ├── simulator/          # Network simulator entry point
+│   └── supervisor/         # Web dashboard entry point
+├── pkg/
+│   ├── api/                # REST API + WebSocket (per-node)
+│   ├── consensus/          # PBFT consensus implementation
+│   ├── gossip/             # Gossip protocol (epidemic broadcast, anti-entropy)
+│   ├── network/            # libp2p host, DHT discovery, connection management
+│   ├── state/              # Ticket state machine, vector clocks
+│   ├── storage/            # BoltDB persistence layer
+│   └── supervisor/         # Supervisor server, node manager, API proxy
+├── internal/
+│   ├── crypto/             # Ed25519 key generation, signing, verification
+│   ├── types/              # Shared types (NodeInfo, TicketMetadata, errors)
+│   └── metrics/            # Prometheus metric definitions and server
+├── web/
+│   └── static/             # Frontend SPA (HTML, CSS, JS)
+│       ├── index.html
+│       ├── css/            # Stylesheets
+│       └── js/             # Modules (app, api, websocket, dashboard, etc.)
+├── proto/                  # Protocol buffer definitions
+├── config/                 # Configuration templates (validator.yaml, prometheus.yml)
+├── scripts/                # Build and test scripts
+├── test/                   # Integration test scenarios
+├── .github/                # CI/CD workflows, PR template, dependabot
+├── Makefile                # Build automation
+├── .goreleaser.yaml        # Release configuration
+└── LICENSE                 # MIT License
+```
 
 ## Performance
 
 ### Benchmarks (7-node network)
 
-- **Consensus Latency**: ~150ms (3 RTT rounds)
-- **Throughput**: ~100 tickets/second
-- **Gossip Fanout**: √7 ≈ 3 peers
-- **Message Overhead**: O(n²) per consensus round
+| Metric            | Value                       |
+| ----------------- | --------------------------- |
+| Consensus latency | ~150ms (3 PBFT round-trips) |
+| Throughput        | ~100 tickets/second         |
+| Gossip fanout     | sqrt(n) peers per round     |
+| Message overhead  | O(n^2) per consensus round  |
 
 ### Scalability
 
-- Peer discovery: O(log n)
-- Gossip dissemination: O(n log n)
-- PBFT consensus: O(n²) messages
-- Storage: O(tickets)
-
-## Project Structure
-
-```
-.
-├── cmd/
-│   ├── validator/          # Validator node binary
-│   └── simulator/          # Network simulator
-├── pkg/
-│   ├── network/            # P2P networking & discovery
-│   ├── gossip/             # Gossip protocol
-│   ├── consensus/          # PBFT consensus
-│   ├── state/              # State machine & vector clocks
-│   ├── storage/            # BoltDB storage
-│   └── api/                # REST API & WebSocket
-├── internal/
-│   ├── crypto/             # Cryptographic utilities
-│   ├── types/              # Common types
-│   └── metrics/            # Prometheus metrics
-├── proto/                  # Protocol buffer definitions
-├── config/                 # Configuration files
-├── test/                   # Tests
-├── Makefile               # Build automation
-└── README.md              # This file
-```
-
-## Development
-
-### Code Style
-
-```bash
-# Format code
-make fmt
-
-# Run linter
-make lint
-```
-
-### Adding New Features
-
-1. Implement in appropriate package (pkg/*)
-2. Add tests
-3. Update API if needed
-4. Update documentation
+| Operation                 | Complexity      |
+| ------------------------- | --------------- |
+| Peer discovery (Kademlia) | O(log n)        |
+| Gossip dissemination      | O(n log n)      |
+| PBFT consensus            | O(n^2) messages |
+| Storage                   | O(tickets)      |
 
 ## Troubleshooting
 
-### Peers Not Connecting
+### Peers not connecting
 
-- Check firewall rules
-- Verify bootstrap peer addresses
-- Ensure ports are not in use
+- Verify bootstrap peer addresses and peer IDs
+- Check that P2P ports are not blocked by a firewall
+- Ensure ports are not already in use by another process
 
-### Consensus Not Reaching
+### Consensus not reaching agreement
 
-- Verify network size meets minimum (4 nodes)
-- Check Byzantine node count (must be < n/3)
-- Review logs for errors
+- Network must have at least 4 nodes
+- Byzantine node count must be strictly less than n/3
+- Check that the primary node is reachable
+- Review node logs for PBFT timeout or view change messages
 
-### High Latency
+### High latency
 
-- Reduce network latency parameter
-- Increase fanout for gossip
-- Check system resources
+- Reduce the simulated network latency parameter
+- Increase gossip fanout for faster dissemination
+- Check system resources (CPU, memory, disk I/O)
+
+### Stale state across nodes
+
+- Anti-entropy runs every 5 seconds — wait for sync
+- Use `curl http://localhost:8081/api/v1/stats` to check peer count and sequence numbers
+- Restart lagging nodes if sequence gaps are large
 
 ## License
 
-MIT License - see LICENSE file for details
+MIT License - see [LICENSE](LICENSE) for details.
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+2. Create a feature branch (`git checkout -b feature/my-feature`)
+3. Make your changes and add tests
+4. Run `make fmt && make lint && make test`
+5. Commit your changes
+6. Push to your branch and open a Pull Request
 
 ## References
 
-- [Practical Byzantine Fault Tolerance (PBFT)](http://pmg.csail.mit.edu/papers/osdi99.pdf)
+- [Practical Byzantine Fault Tolerance (Castro & Liskov, 1999)](http://pmg.csail.mit.edu/papers/osdi99.pdf)
 - [libp2p Specifications](https://github.com/libp2p/specs)
-- [Epidemic Algorithms for Replicated Database Maintenance](https://dl.acm.org/doi/10.1145/41840.41841)
+- [Epidemic Algorithms for Replicated Database Maintenance (Demers et al., 1987)](https://dl.acm.org/doi/10.1145/41840.41841)
 - [Vector Clocks](https://en.wikipedia.org/wiki/Vector_clock)
-
-## Contact
-
-For questions or issues, please open a GitHub issue.
+- [Kademlia: A Peer-to-peer Information System Based on the XOR Metric](https://pdos.csail.mit.edu/~petar/papers/maymounkov-kademlia-lncs.pdf)
