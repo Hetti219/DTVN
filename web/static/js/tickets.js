@@ -93,15 +93,6 @@ export class TicketManager {
 
         // Load tickets
         await this.loadTickets();
-
-        // Setup WebSocket listeners (only once to prevent accumulation on re-render)
-        if (!this.wsListenersRegistered) {
-            this.ws.on('ticket_validated', () => this.loadTickets());
-            this.ws.on('ticket_consumed', () => this.loadTickets());
-            this.ws.on('ticket_disputed', () => this.loadTickets());
-            this.ws.on('tickets_seeded', () => this.loadTickets());
-            this.wsListenersRegistered = true;
-        }
     }
 
     async handleSeedTickets() {
@@ -270,7 +261,7 @@ export class TicketManager {
     }
 
     handleWSEvent(event) {
-        if (event.type.startsWith('ticket_')) {
+        if (event.type.startsWith('ticket_') || event.type === 'tickets_seeded') {
             this.loadTickets();
         }
     }
