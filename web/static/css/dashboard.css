@@ -10,8 +10,13 @@
 .card {
     background-color: var(--color-card-bg);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-lg);
     padding: var(--spacing-lg);
+    transition: background-color var(--transition-fast);
+}
+
+.card:hover {
+    background-color: rgba(231, 233, 234, 0.03);
 }
 
 .card-header {
@@ -25,11 +30,9 @@
 
 .card-title {
     font-family: var(--font-sans);
-    font-size: 0.8125rem;
-    font-weight: 600;
+    font-size: 15px;
+    font-weight: 700;
     color: var(--color-text);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
 }
 
 .card-body {
@@ -45,11 +48,9 @@
 }
 
 .stat-label {
-    font-family: var(--font-serif);
-    font-size: 0.8125rem;
+    font-family: var(--font-sans);
+    font-size: 13px;
     color: var(--color-text-secondary);
-    font-style: italic;
-    letter-spacing: 0.02em;
 }
 
 .stat-value {
@@ -85,7 +86,7 @@ table {
 }
 
 thead {
-    background-color: var(--color-surface-raised);
+    background-color: var(--color-card-bg);
     border-bottom: 1px solid var(--color-border);
 }
 
@@ -95,9 +96,7 @@ th {
     font-family: var(--font-sans);
     font-weight: 600;
     color: var(--color-text-secondary);
-    text-transform: uppercase;
-    font-size: 0.6875rem;
-    letter-spacing: 0.08em;
+    font-size: 13px;
 }
 
 td {
@@ -106,7 +105,7 @@ td {
 }
 
 tbody tr:hover {
-    background-color: var(--color-surface-raised);
+    background-color: rgba(231, 233, 234, 0.03);
     cursor: pointer;
 }
 
@@ -114,52 +113,50 @@ tbody tr:hover {
 .badge {
     display: inline-block;
     padding: var(--spacing-xs) var(--spacing-sm);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-full);
     font-family: var(--font-sans);
     font-size: 0.6875rem;
     font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
 }
 
 .badge-issued {
-    background-color: rgba(122, 127, 141, 0.15);
+    background-color: rgba(113, 118, 123, 0.15);
     color: var(--color-issued);
 }
 
 .badge-pending {
-    background-color: rgba(212, 168, 71, 0.15);
+    background-color: rgba(255, 212, 0, 0.15);
     color: var(--color-pending);
 }
 
 .badge-validated {
-    background-color: rgba(76, 175, 130, 0.15);
+    background-color: rgba(0, 186, 124, 0.15);
     color: var(--color-validated);
 }
 
 .badge-consumed {
-    background-color: rgba(91, 141, 239, 0.15);
+    background-color: rgba(29, 155, 240, 0.15);
     color: var(--color-consumed);
 }
 
 .badge-disputed {
-    background-color: rgba(199, 80, 80, 0.15);
+    background-color: rgba(244, 33, 46, 0.15);
     color: var(--color-disputed);
 }
 
 /* Role badges */
 .badge-primary {
-    background-color: rgba(91, 141, 239, 0.15);
+    background-color: rgba(29, 155, 240, 0.15);
     color: var(--color-primary);
 }
 
 .badge-replica {
-    background-color: rgba(122, 127, 141, 0.15);
+    background-color: rgba(113, 118, 123, 0.15);
     color: var(--color-replica);
 }
 
 .badge-byzantine {
-    background-color: rgba(199, 80, 80, 0.15);
+    background-color: rgba(244, 33, 46, 0.15);
     color: var(--color-byzantine);
 }
 
@@ -177,19 +174,16 @@ tbody tr:hover {
 
 .page-title {
     font-family: var(--font-sans);
-    font-size: 1.5rem;
-    font-weight: 600;
+    font-size: 20px;
+    font-weight: 700;
     margin-bottom: var(--spacing-sm);
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
     color: var(--color-text);
 }
 
 .page-description {
-    font-family: var(--font-serif);
-    font-style: italic;
+    font-family: var(--font-sans);
     color: var(--color-text-secondary);
-    font-size: 0.9375rem;
+    font-size: 15px;
     line-height: 1.5;
 }
 
@@ -213,9 +207,8 @@ tbody tr:hover {
 }
 
 .empty-state-subtext {
-    font-family: var(--font-serif);
-    font-style: italic;
     font-size: 0.875rem;
+    color: var(--color-text-secondary);
 }
 
 /* Responsive dashboard grid */
@@ -227,7 +220,7 @@ tbody tr:hover {
 
 @media (max-width: 640px) {
     .page-title {
-        font-size: 1.25rem;
+        font-size: 18px;
     }
 
     .quick-actions {
