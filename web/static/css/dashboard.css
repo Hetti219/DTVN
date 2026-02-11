@@ -10,14 +10,8 @@
 .card {
     background-color: var(--color-card-bg);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-md);
     padding: var(--spacing-lg);
-    box-shadow: var(--shadow-sm);
-    transition: box-shadow var(--transition-normal);
-}
-
-.card:hover {
-    box-shadow: var(--shadow-md);
 }
 
 .card-header {
@@ -30,9 +24,12 @@
 }
 
 .card-title {
-    font-size: 1.125rem;
+    font-family: var(--font-sans);
+    font-size: 0.8125rem;
     font-weight: 600;
     color: var(--color-text);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
 }
 
 .card-body {
@@ -48,16 +45,19 @@
 }
 
 .stat-label {
-    font-size: 0.875rem;
+    font-family: var(--font-serif);
+    font-size: 0.8125rem;
     color: var(--color-text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    font-style: italic;
+    letter-spacing: 0.02em;
 }
 
 .stat-value {
-    font-size: 2rem;
+    font-family: var(--font-sans);
+    font-size: 1.75rem;
     font-weight: 700;
     color: var(--color-text);
+    font-variant-numeric: tabular-nums;
 }
 
 .stat-row {
@@ -85,18 +85,19 @@ table {
 }
 
 thead {
-    background-color: var(--color-bg);
-    border-bottom: 2px solid var(--color-border);
+    background-color: var(--color-surface-raised);
+    border-bottom: 1px solid var(--color-border);
 }
 
 th {
     padding: var(--spacing-md);
     text-align: left;
+    font-family: var(--font-sans);
     font-weight: 600;
     color: var(--color-text-secondary);
     text-transform: uppercase;
-    font-size: 0.75rem;
-    letter-spacing: 0.05em;
+    font-size: 0.6875rem;
+    letter-spacing: 0.08em;
 }
 
 td {
@@ -105,7 +106,7 @@ td {
 }
 
 tbody tr:hover {
-    background-color: var(--color-bg);
+    background-color: var(--color-surface-raised);
     cursor: pointer;
 }
 
@@ -114,50 +115,51 @@ tbody tr:hover {
     display: inline-block;
     padding: var(--spacing-xs) var(--spacing-sm);
     border-radius: var(--radius-sm);
-    font-size: 0.75rem;
+    font-family: var(--font-sans);
+    font-size: 0.6875rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
 
 .badge-issued {
-    background-color: rgba(107, 114, 128, 0.1);
+    background-color: rgba(122, 127, 141, 0.15);
     color: var(--color-issued);
 }
 
 .badge-pending {
-    background-color: rgba(245, 158, 11, 0.1);
+    background-color: rgba(212, 168, 71, 0.15);
     color: var(--color-pending);
 }
 
 .badge-validated {
-    background-color: rgba(16, 185, 129, 0.1);
+    background-color: rgba(76, 175, 130, 0.15);
     color: var(--color-validated);
 }
 
 .badge-consumed {
-    background-color: rgba(59, 130, 246, 0.1);
+    background-color: rgba(91, 141, 239, 0.15);
     color: var(--color-consumed);
 }
 
 .badge-disputed {
-    background-color: rgba(239, 68, 68, 0.1);
+    background-color: rgba(199, 80, 80, 0.15);
     color: var(--color-disputed);
 }
 
 /* Role badges */
 .badge-primary {
-    background-color: rgba(59, 130, 246, 0.1);
+    background-color: rgba(91, 141, 239, 0.15);
     color: var(--color-primary);
 }
 
 .badge-replica {
-    background-color: rgba(107, 114, 128, 0.1);
+    background-color: rgba(122, 127, 141, 0.15);
     color: var(--color-replica);
 }
 
 .badge-byzantine {
-    background-color: rgba(220, 38, 38, 0.1);
+    background-color: rgba(199, 80, 80, 0.15);
     color: var(--color-byzantine);
 }
 
@@ -174,14 +176,21 @@ tbody tr:hover {
 }
 
 .page-title {
-    font-size: 1.875rem;
-    font-weight: 700;
+    font-family: var(--font-sans);
+    font-size: 1.5rem;
+    font-weight: 600;
     margin-bottom: var(--spacing-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-text);
 }
 
 .page-description {
+    font-family: var(--font-serif);
+    font-style: italic;
     color: var(--color-text-secondary);
-    font-size: 1rem;
+    font-size: 0.9375rem;
+    line-height: 1.5;
 }
 
 /* Empty states */
@@ -192,9 +201,10 @@ tbody tr:hover {
 }
 
 .empty-state-icon {
-    font-size: 3rem;
+    font-size: 2rem;
     margin-bottom: var(--spacing-md);
-    opacity: 0.5;
+    opacity: 0.4;
+    color: var(--color-text-secondary);
 }
 
 .empty-state-text {
@@ -203,6 +213,8 @@ tbody tr:hover {
 }
 
 .empty-state-subtext {
+    font-family: var(--font-serif);
+    font-style: italic;
     font-size: 0.875rem;
 }
 
@@ -215,7 +227,7 @@ tbody tr:hover {
 
 @media (max-width: 640px) {
     .page-title {
-        font-size: 1.5rem;
+        font-size: 1.25rem;
     }
 
     .quick-actions {
@@ -223,6 +235,6 @@ tbody tr:hover {
     }
 
     .stat-value {
-        font-size: 1.5rem;
+        font-size: 1.25rem;
     }
 }

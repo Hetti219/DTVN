@@ -48,19 +48,19 @@ export class NetworkViz {
                 <div class="card-body">
                     <div style="display: flex; gap: 2rem; flex-wrap: wrap;">
                         <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#3B82F6"/></svg>
+                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#C9A84C"/></svg>
                             <span>Primary Node</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#10B981"/></svg>
+                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#4CAF82"/></svg>
                             <span>Running Replica</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#F59E0B"/></svg>
+                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#D4A847"/></svg>
                             <span>Starting Node</span>
                         </div>
                         <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#DC2626"/></svg>
+                            <svg width="20" height="20"><circle cx="10" cy="10" r="8" fill="#C75050"/></svg>
                             <span>Error / Stopped</span>
                         </div>
                     </div>
@@ -307,11 +307,11 @@ export class NetworkViz {
     }
 
     getNodeColor(d) {
-        if (d.isError || d.isStopped) return '#DC2626';
-        if (d.isStarting) return '#F59E0B';
-        if (d.isPrimary) return '#3B82F6';
-        if (d.isRunning) return '#10B981';
-        return '#6B7280';
+        if (d.isError || d.isStopped) return '#C75050';
+        if (d.isStarting) return '#D4A847';
+        if (d.isPrimary) return '#C9A84C';
+        if (d.isRunning) return '#4CAF82';
+        return '#7A7F8D';
     }
 
     renderGraph() {
@@ -327,7 +327,7 @@ export class NetworkViz {
                 .attr('x', width / 2)
                 .attr('y', 300)
                 .attr('text-anchor', 'middle')
-                .attr('fill', 'var(--color-text-muted)')
+                .attr('fill', '#7A7F8D')
                 .attr('font-size', '14px')
                 .text('No nodes available. Start a cluster to see the network graph.');
             return;
@@ -338,8 +338,8 @@ export class NetworkViz {
             .selectAll('line')
             .data(this.links)
             .enter().append('line')
-            .attr('stroke', '#999')
-            .attr('stroke-opacity', 0.4)
+            .attr('stroke', '#5B8DEF')
+            .attr('stroke-opacity', 0.25)
             .attr('stroke-width', 1.5);
 
         // Create node groups
@@ -356,8 +356,8 @@ export class NetworkViz {
         node.append('circle')
             .attr('r', d => d.isPrimary ? 20 : 16)
             .attr('fill', d => this.getNodeColor(d))
-            .attr('stroke', d => d.isPrimary ? '#1D4ED8' : 'none')
-            .attr('stroke-width', d => d.isPrimary ? 3 : 0);
+            .attr('stroke', d => d.isPrimary ? '#A8893B' : 'none')
+            .attr('stroke-width', d => d.isPrimary ? 2 : 0);
 
         // Add labels
         node.append('text')
@@ -365,7 +365,7 @@ export class NetworkViz {
             .attr('x', 0)
             .attr('y', 30)
             .attr('text-anchor', 'middle')
-            .attr('fill', 'var(--color-text)')
+            .attr('fill', '#E8E9ED')
             .attr('font-size', '12px');
 
         // Add tooltips

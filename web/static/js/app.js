@@ -119,7 +119,6 @@ class App {
                 default:
                     contentArea.innerHTML = `
                         <div class="empty-state">
-                            <div class="empty-state-icon">🚧</div>
                             <div class="empty-state-text">Section not found</div>
                             <div class="empty-state-subtext">The requested section is not available</div>
                         </div>

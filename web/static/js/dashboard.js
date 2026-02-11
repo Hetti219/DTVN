@@ -98,16 +98,16 @@ export class Dashboard {
                 <div class="card-body">
                     <div class="quick-actions">
                         <button class="btn btn-primary" onclick="window.app.loadSection('tickets')">
-                            🎫 Validate Ticket
+                            Validate Ticket
                         </button>
                         <button class="btn btn-primary" onclick="window.app.loadSection('simulator')">
-                            🧪 Run Simulation
+                            Run Simulation
                         </button>
                         <button class="btn btn-secondary" onclick="window.app.loadSection('network')">
-                            🔗 View Network
+                            View Network
                         </button>
                         <button class="btn btn-secondary" onclick="window.app.loadSection('metrics')">
-                            📈 View Metrics
+                            View Metrics
                         </button>
                     </div>
                 </div>

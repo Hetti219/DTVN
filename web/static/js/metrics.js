@@ -118,7 +118,7 @@ export class Metrics {
 
     initCharts() {
         const chartFont = { family: "'Inter', -apple-system, sans-serif" };
-        const gridColor = 'rgba(156, 163, 175, 0.15)';
+        const gridColor = 'rgba(122, 127, 141, 0.1)';
 
         this.charts.consensus = new Chart(document.getElementById('consensus-chart'), {
             type: 'line',
@@ -127,8 +127,8 @@ export class Metrics {
                 datasets: [{
                     label: 'Sequence #',
                     data: [],
-                    borderColor: '#3B82F6',
-                    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                    borderColor: '#5B8DEF',
+                    backgroundColor: 'rgba(91, 141, 239, 0.06)',
                     fill: true,
                     tension: 0.3,
                     pointRadius: 0,
@@ -144,13 +144,13 @@ export class Metrics {
                     x: {
                         display: true,
                         grid: { display: false },
-                        ticks: { maxTicksLimit: 8, font: chartFont, color: '#9CA3AF' }
+                        ticks: { maxTicksLimit: 8, font: chartFont, color: '#7A7F8D' }
                     },
                     y: {
                         beginAtZero: true,
                         grid: { color: gridColor },
-                        ticks: { font: chartFont, color: '#9CA3AF', precision: 0 },
-                        title: { display: true, text: 'Sequence #', font: chartFont, color: '#9CA3AF' }
+                        ticks: { font: chartFont, color: '#7A7F8D', precision: 0 },
+                        title: { display: true, text: 'Sequence #', font: chartFont, color: '#7A7F8D' }
                     }
                 },
                 plugins: { legend: { display: false } }
@@ -164,8 +164,8 @@ export class Metrics {
                 datasets: [{
                     label: 'Peers',
                     data: [],
-                    borderColor: '#10B981',
-                    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                    borderColor: '#4CAF82',
+                    backgroundColor: 'rgba(76, 175, 130, 0.06)',
                     fill: true,
                     tension: 0.3,
                     pointRadius: 0,
@@ -181,13 +181,13 @@ export class Metrics {
                     x: {
                         display: true,
                         grid: { display: false },
-                        ticks: { maxTicksLimit: 8, font: chartFont, color: '#9CA3AF' }
+                        ticks: { maxTicksLimit: 8, font: chartFont, color: '#7A7F8D' }
                     },
                     y: {
                         beginAtZero: true,
                         grid: { color: gridColor },
-                        ticks: { font: chartFont, color: '#9CA3AF', stepSize: 1 },
-                        title: { display: true, text: 'Peers', font: chartFont, color: '#9CA3AF' }
+                        ticks: { font: chartFont, color: '#7A7F8D', stepSize: 1 },
+                        title: { display: true, text: 'Peers', font: chartFont, color: '#7A7F8D' }
                     }
                 },
                 plugins: { legend: { display: false } }
@@ -200,7 +200,7 @@ export class Metrics {
                 labels: ['Issued', 'Validated', 'Consumed', 'Disputed'],
                 datasets: [{
                     data: [0, 0, 0, 0],
-                    backgroundColor: ['#6B7280', '#10B981', '#3B82F6', '#EF4444'],
+                    backgroundColor: ['#7A7F8D', '#4CAF82', '#5B8DEF', '#C75050'],
                     borderWidth: 0,
                     hoverOffset: 4
                 }]
@@ -213,7 +213,7 @@ export class Metrics {
                 plugins: {
                     legend: {
                         position: 'bottom',
-                        labels: { font: chartFont, color: '#9CA3AF', padding: 16, usePointStyle: true }
+                        labels: { font: chartFont, color: '#7A7F8D', padding: 16, usePointStyle: true }
                     }
                 }
             }
@@ -226,8 +226,8 @@ export class Metrics {
                 datasets: [{
                     label: 'Nodes',
                     data: [0, 0, 0, 0],
-                    backgroundColor: ['#10B981', '#F59E0B', '#6B7280', '#EF4444'],
-                    borderRadius: 4,
+                    backgroundColor: ['#4CAF82', '#D4A847', '#7A7F8D', '#C75050'],
+                    borderRadius: 2,
                     borderSkipped: false
                 }]
             },
@@ -238,12 +238,12 @@ export class Metrics {
                 scales: {
                     x: {
                         grid: { display: false },
-                        ticks: { font: chartFont, color: '#9CA3AF' }
+                        ticks: { font: chartFont, color: '#7A7F8D' }
                     },
                     y: {
                         beginAtZero: true,
                         grid: { color: gridColor },
-                        ticks: { font: chartFont, color: '#9CA3AF', stepSize: 1, precision: 0 }
+                        ticks: { font: chartFont, color: '#7A7F8D', stepSize: 1, precision: 0 }
                     }
                 },
                 plugins: { legend: { display: false } }
