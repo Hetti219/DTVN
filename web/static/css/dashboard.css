@@ -12,12 +12,24 @@
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
     padding: var(--spacing-lg);
-    transition: background-color var(--transition-fast);
+    animation: cardFadeIn 0.25s ease-out both;
 }
 
-.card:hover {
-    background-color: rgba(231, 233, 234, 0.03);
+@keyframes cardFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
 }
+
+.dashboard-grid .card:nth-child(1) { animation-delay: 0ms; }
+.dashboard-grid .card:nth-child(2) { animation-delay: 50ms; }
+.dashboard-grid .card:nth-child(3) { animation-delay: 100ms; }
+.dashboard-grid .card:nth-child(4) { animation-delay: 150ms; }
 
 .card-header {
     display: flex;
@@ -33,34 +45,42 @@
     font-size: 15px;
     font-weight: 700;
     color: var(--color-text);
+    letter-spacing: -0.01em;
 }
 
 .card-body {
     color: var(--color-text-secondary);
 }
 
-/* Stat Display */
-.stat {
+.card-full-width {
+    grid-column: 1 / -1;
+}
+
+/* Dashboard-specific stacked stat display (column layout) */
+.dash-stat {
     display: flex;
     flex-direction: column;
     gap: var(--spacing-xs);
     margin-bottom: var(--spacing-md);
 }
 
-.stat-label {
+.dash-stat-label {
     font-family: var(--font-sans);
     font-size: 13px;
     color: var(--color-text-secondary);
+    font-weight: 500;
 }
 
-.stat-value {
+.dash-stat-value {
     font-family: var(--font-sans);
-    font-size: 1.75rem;
+    font-size: 1.5rem;
     font-weight: 700;
     color: var(--color-text);
     font-variant-numeric: tabular-nums;
+    line-height: 1.2;
 }
 
+/* Stat rows (key-value pairs in cards) */
 .stat-row {
     display: flex;
     justify-content: space-between;
@@ -95,30 +115,31 @@ th {
     text-align: left;
     font-family: var(--font-sans);
     font-weight: 600;
-    color: var(--color-text-secondary);
-    font-size: 13px;
+    color: var(--color-text);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
 }
 
 td {
     padding: var(--spacing-md);
     border-bottom: 1px solid var(--color-border);
+    color: var(--color-text);
+}
+
+tbody tr:nth-child(even) {
+    background-color: rgba(231, 233, 234, 0.015);
 }
 
 tbody tr:hover {
     background-color: rgba(231, 233, 234, 0.03);
+}
+
+tbody tr.clickable:hover {
     cursor: pointer;
 }
 
-/* State badges */
-.badge {
-    display: inline-block;
-    padding: var(--spacing-xs) var(--spacing-sm);
-    border-radius: var(--radius-full);
-    font-family: var(--font-sans);
-    font-size: 0.6875rem;
-    font-weight: 600;
-}
-
+/* Domain-specific badge variants (base .badge is in components.css) */
 .badge-issued {
     background-color: rgba(113, 118, 123, 0.15);
     color: var(--color-issued);
@@ -174,9 +195,10 @@ tbody tr:hover {
 
 .page-title {
     font-family: var(--font-sans);
-    font-size: 20px;
-    font-weight: 700;
-    margin-bottom: var(--spacing-sm);
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin-bottom: var(--spacing-xs);
     color: var(--color-text);
 }
 
@@ -187,13 +209,7 @@ tbody tr:hover {
     line-height: 1.5;
 }
 
-/* Empty states */
-.empty-state {
-    text-align: center;
-    padding: var(--spacing-xl);
-    color: var(--color-text-secondary);
-}
-
+/* Empty state sub-elements (base .empty-state is in components.css) */
 .empty-state-icon {
     font-size: 2rem;
     margin-bottom: var(--spacing-md);
@@ -227,7 +243,7 @@ tbody tr:hover {
         flex-direction: column;
     }
 
-    .stat-value {
+    .dash-stat-value {
         font-size: 1.25rem;
     }
 }
