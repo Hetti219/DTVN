@@ -1,10 +1,5 @@
 # Binaries
 bin/
-*.exe
-*.exe~
-*.dll
-*.so
-*.dylib
 
 # Test binary, built with `go test -c`
 *.test
@@ -24,14 +19,6 @@ test-data/
 *.swp
 *.swo
 *~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Documentation
-*.pdf
-distributed-ticket-validation-implementation.md
 
 # Logs
 *.log

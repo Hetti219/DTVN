@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -79,6 +80,23 @@ func (m *MockValidator) DisputeTicket(ticketID string) error {
 		return nil
 	}
 	return errors.New("ticket not found")
+}
+
+func (m *MockValidator) SeedTickets() (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	seeded := 0
+	for i := 1; i <= 500; i++ {
+		id := fmt.Sprintf("TICKET-%03d", i)
+		if _, exists := m.tickets[id]; !exists {
+			m.tickets[id] = map[string]interface{}{
+				"id":    id,
+				"state": "ISSUED",
+			}
+			seeded++
+		}
+	}
+	return seeded, nil
 }
 
 func (m *MockValidator) GetTicket(ticketID string) (interface{}, error) {

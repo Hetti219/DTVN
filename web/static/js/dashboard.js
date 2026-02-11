@@ -5,6 +5,7 @@ export class Dashboard {
         this.ws = ws;
         this.stats = null;
         this.recentTickets = [];
+        this.wsListenersRegistered = false;
     }
 
     async render(container) {
@@ -63,7 +64,11 @@ export class Dashboard {
                             <span id="dash-total-tickets" class="stat-value">0</span>
                         </div>
                         <div class="stat">
-                            <span class="stat-label">Validated Tickets</span>
+                            <span class="stat-label">Issued (Awaiting Scan)</span>
+                            <span id="dash-issued-tickets" class="stat-value">0</span>
+                        </div>
+                        <div class="stat">
+                            <span class="stat-label">Validated</span>
                             <span id="dash-validated-tickets" class="stat-value">0</span>
                         </div>
                     </div>
@@ -112,25 +117,29 @@ export class Dashboard {
         // Load initial data
         await this.loadData();
 
-        // Setup WebSocket listeners
-        this.ws.on('ticket_validated', () => this.loadData());
-        this.ws.on('ticket_consumed', () => this.loadData());
-        this.ws.on('ticket_disputed', () => this.loadData());
-        this.ws.on('stats_update', (data) => this.updateStats(data.stats));
+        // Setup WebSocket listeners (only once to prevent accumulation on re-render)
+        if (!this.wsListenersRegistered) {
+            this.ws.on('ticket_validated', () => this.loadData());
+            this.ws.on('ticket_consumed', () => this.loadData());
+            this.ws.on('ticket_disputed', () => this.loadData());
+            this.ws.on('tickets_seeded', () => this.loadData());
+            this.ws.on('stats_update', (data) => this.updateStats(data.stats));
+            this.wsListenersRegistered = true;
+        }
     }
 
     async loadData() {
         try {
-            // Fetch stats
-            const statsResponse = await this.api.getStats();
-            if (statsResponse.success && statsResponse.data) {
-                this.updateStats(statsResponse.data);
+            // Fetch stats (api.js already unwraps {success, data} envelope)
+            const stats = await this.api.getStats();
+            if (stats) {
+                this.updateStats(stats);
             }
 
-            // Fetch tickets
-            const ticketsResponse = await this.api.getAllTickets();
-            if (ticketsResponse.success && ticketsResponse.data) {
-                this.updateRecentActivity(ticketsResponse.data);
+            // Fetch tickets (api.js already unwraps {success, data} envelope)
+            const tickets = await this.api.getAllTickets();
+            if (tickets) {
+                this.updateRecentActivity(Array.isArray(tickets) ? tickets : []);
             }
         } catch (error) {
             console.error('Failed to load dashboard data:', error);
@@ -177,12 +186,10 @@ export class Dashboard {
             return;
         }
 
-        // Update total tickets count
+        // Update ticket counts
         document.getElementById('dash-total-tickets').textContent = tickets.length;
-
-        // Count validated tickets
-        const validatedCount = tickets.filter(t => t.State === 'VALIDATED').length;
-        document.getElementById('dash-validated-tickets').textContent = validatedCount;
+        document.getElementById('dash-issued-tickets').textContent = tickets.filter(t => t.State === 'ISSUED').length;
+        document.getElementById('dash-validated-tickets').textContent = tickets.filter(t => t.State === 'VALIDATED').length;
 
         // Build table
         activityContainer.innerHTML = `

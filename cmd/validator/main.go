@@ -892,15 +892,18 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 	if n.pbftNode.IsPrimary() {
 		fmt.Printf("Node %s: ✅ Received validation request for ticket %s (I am primary)\n", n.nodeID, ticketID)
 
-		// Check peer connectivity for multi-node setup
+		// Check peer connectivity for multi-node setup.
+		// PBFT requires 2f+1 votes where f = (n-1)/3. The primary counts as one
+		// of the 2f+1, so we need at least 2f peers to reach quorum.
 		peerCount := n.p2pHost.GetPeerCount()
-		expectedPeers := n.totalNodes - 1 // All nodes except self
+		f := (n.totalNodes - 1) / 3 // max Byzantine faults
+		minPeers := 2 * f           // minimum peers needed (quorum = 2f+1, minus self)
 
-		if expectedPeers > 0 && peerCount == 0 {
-			return fmt.Errorf("no peers connected, cannot reach consensus (expected %d peers)", expectedPeers)
+		if n.totalNodes > 1 && peerCount < minPeers {
+			return fmt.Errorf("not enough peers for consensus: have %d, need at least %d (quorum requires %d of %d nodes)", peerCount, minPeers, 2*f+1, n.totalNodes)
 		}
-		if peerCount < expectedPeers {
-			fmt.Printf("Node %s: ⚠️  WARNING - only %d/%d peers connected\n", n.nodeID, peerCount, expectedPeers)
+		if peerCount < n.totalNodes-1 {
+			fmt.Printf("Node %s: ⚠️  WARNING - only %d/%d peers connected (minimum %d for consensus)\n", n.nodeID, peerCount, n.totalNodes-1, minPeers)
 		}
 
 		// Create result channel for synchronous waiting
@@ -946,11 +949,37 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 	primary := n.pbftNode.GetPrimary()
 	fmt.Printf("Node %s: 📤 Forwarding validation request for ticket %s to primary %s\n", n.nodeID, ticketID, primary)
 
-	// Check if we have any peers to forward to
-	peerCount := n.p2pHost.GetPeerCount()
-	if peerCount == 0 {
-		return fmt.Errorf("no peers connected, cannot forward request to primary %s", primary)
+	// Wait for peers to connect (with retry)
+	// This handles the race condition where API starts before peer discovery completes
+	maxRetries := 5
+	retryDelay := 1 * time.Second
+	var peerCount int
+
+	for i := 0; i < maxRetries; i++ {
+		peerCount = n.p2pHost.GetPeerCount()
+		if peerCount > 0 {
+			break
+		}
+
+		if i == 0 {
+			fmt.Printf("Node %s: ⏳ Waiting for peer connections (attempt %d/%d)...\n", n.nodeID, i+1, maxRetries)
+		} else {
+			fmt.Printf("Node %s: ⏳ Retrying... (attempt %d/%d)\n", n.nodeID, i+1, maxRetries)
+		}
+
+		select {
+		case <-time.After(retryDelay):
+			continue
+		case <-n.ctx.Done():
+			return fmt.Errorf("node shutting down")
+		}
 	}
+
+	if peerCount == 0 {
+		return fmt.Errorf("no peers connected after %d attempts, cannot forward request to primary %s. Please wait for peer discovery to complete", maxRetries, primary)
+	}
+
+	fmt.Printf("Node %s: ✅ Connected to %d peer(s), forwarding request\n", n.nodeID, peerCount)
 
 	// Serialize the request
 	payload, err := consensus.SerializeRequest(req)
@@ -1139,4 +1168,54 @@ func (n *ValidatorNode) loadTicketsFromStore() {
 	}
 
 	fmt.Printf("Node %s: ✅ Loaded %d tickets from persistent store\n", n.nodeID, len(records))
+}
+
+// SeedTickets generates and loads 500 deterministic dummy "purchased" tickets
+// into the node's state machine and persists them to BoltDB.
+// This simulates the pre-event ticket sales database that every node should have.
+func (n *ValidatorNode) SeedTickets() (int, error) {
+	sections := []string{"VIP", "Floor", "Balcony", "General"}
+	prices := []string{"150.00", "85.00", "65.00", "40.00"}
+
+	tickets := make([]*state.Ticket, 0, 500)
+	for i := 1; i <= 500; i++ {
+		ticketID := fmt.Sprintf("TICKET-%03d", i)
+		sectionIdx := (i - 1) % len(sections)
+		seatRow := string(rune('A' + ((i-1)/10)%26))
+		seatNum := (i-1)%10 + 1
+
+		data := fmt.Sprintf(`{"event":"Summer Music Festival 2026","venue":"Grand Arena","section":"%s","seat":"%s%d","price":"%s","buyer":"buyer_%03d@email.com"}`,
+			sections[sectionIdx], seatRow, seatNum, prices[sectionIdx], i)
+
+		tickets = append(tickets, &state.Ticket{
+			ID:        ticketID,
+			State:     state.StateIssued,
+			Data:      []byte(data),
+			Timestamp: time.Now().Unix(),
+			Metadata:  map[string]string{"source": "seed"},
+		})
+	}
+
+	seeded, err := n.stateMachine.SeedTickets(tickets)
+	if err != nil {
+		return 0, fmt.Errorf("failed to seed tickets: %w", err)
+	}
+
+	// Persist all seeded tickets to BoltDB
+	for _, t := range tickets {
+		record := &storage.TicketRecord{
+			ID:          t.ID,
+			State:       string(state.StateIssued),
+			Data:        t.Data,
+			ValidatorID: "",
+			Timestamp:   t.Timestamp,
+			Metadata:    t.Metadata,
+		}
+		if err := n.storage.SaveTicket(record); err != nil {
+			fmt.Printf("Node %s: ⚠️  Failed to persist seeded ticket %s: %v\n", n.nodeID, t.ID, err)
+		}
+	}
+
+	fmt.Printf("Node %s: 🎫 Seeded %d tickets (500 total requested, %d already existed)\n", n.nodeID, seeded, 500-seeded)
+	return seeded, nil
 }

@@ -75,10 +75,24 @@ func NewServer(cfg *ServerConfig) *Server {
 			})
 		},
 		StatusCallback: func(nodeID string, status NodeStatus) {
-			s.broadcastWSMessage(map[string]interface{}{
+			// Send full node info so the frontend can add new nodes it doesn't know about
+			node, err := s.nodeManager.GetNode(nodeID)
+			msg := map[string]interface{}{
 				"type":    "node_status",
 				"node_id": nodeID,
 				"status":  status,
+			}
+			if err == nil && node != nil {
+				msg["node"] = node
+			}
+			s.broadcastWSMessage(msg)
+		},
+		ClusterCallback: func(status ClusterStatus, nodesStarted int, nodesTotal int) {
+			s.broadcastWSMessage(map[string]interface{}{
+				"type":          "cluster_status",
+				"status":        status,
+				"nodes_started": nodesStarted,
+				"nodes_total":   nodesTotal,
 			})
 		},
 	})
@@ -146,6 +160,7 @@ func (s *Server) setupRoutes() {
 	api.HandleFunc("/tickets/validate", s.handleProxyValidateTicket).Methods("POST")
 	api.HandleFunc("/tickets/consume", s.handleProxyConsumeTicket).Methods("POST")
 	api.HandleFunc("/tickets/dispute", s.handleProxyDisputeTicket).Methods("POST")
+	api.HandleFunc("/tickets/seed", s.handleProxySeedTickets).Methods("POST")
 	api.HandleFunc("/tickets/{id}", s.handleProxyGetTicket).Methods("GET")
 
 	// Stats proxy endpoint
@@ -205,7 +220,7 @@ func (s *Server) Start() error {
 		Addr:         s.addr,
 		Handler:      s.router,
 		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
+		WriteTimeout: 60 * time.Second,
 	}
 
 	fmt.Printf("Supervisor server starting on http://%s\n", s.addr)
@@ -375,6 +390,8 @@ func (s *Server) handleStartCluster(w http.ResponseWriter, r *http.Request) {
 		req.NodeCount = 4 // Default to 4 nodes
 	}
 
+	// StartCluster is now asynchronous - it returns immediately and starts
+	// nodes in the background. Progress is sent via WebSocket cluster_status events.
 	if err := s.nodeManager.StartCluster(req.NodeCount); err != nil {
 		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -469,6 +486,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		"type":             "connected",
 		"nodes":            s.nodeManager.GetAllNodes(),
 		"simulator_status": s.simController.GetStatus(),
+		"cluster_status":   s.nodeManager.GetClusterStatus(),
 	})
 
 	// Handle incoming messages

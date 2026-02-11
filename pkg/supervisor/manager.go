@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/Hetti219/DTVN/pkg/network"
+	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 // NodeStatus represents the status of a managed node
@@ -85,27 +88,41 @@ func (b *OutputBuffer) Clear() {
 	b.lines = b.lines[:0]
 }
 
+// ClusterStatus represents the status of the cluster
+type ClusterStatus string
+
+const (
+	ClusterStatusIdle     ClusterStatus = "idle"
+	ClusterStatusStarting ClusterStatus = "starting"
+	ClusterStatusRunning  ClusterStatus = "running"
+	ClusterStatusStopping ClusterStatus = "stopping"
+)
+
 // NodeManager manages multiple validator node processes
 type NodeManager struct {
-	nodes          map[string]*ManagedNode
-	validatorPath  string
-	dataDir        string
-	basePort       int
-	baseAPIPort    int
-	totalNodes     int
-	mu             sync.RWMutex
-	outputCallback func(nodeID string, line string)
-	statusCallback func(nodeID string, status NodeStatus)
+	nodes           map[string]*ManagedNode
+	validatorPath   string
+	dataDir         string
+	basePort        int
+	baseAPIPort     int
+	totalNodes      int
+	mu              sync.RWMutex
+	outputCallback  func(nodeID string, line string)
+	statusCallback  func(nodeID string, status NodeStatus)
+	clusterCallback func(status ClusterStatus, nodesStarted int, nodesTotal int)
+	clusterStatus   ClusterStatus
+	clusterMu       sync.Mutex // Prevents concurrent cluster operations
 }
 
 // NodeManagerConfig holds configuration for the node manager
 type NodeManagerConfig struct {
-	ValidatorPath  string
-	DataDir        string
-	BasePort       int
-	BaseAPIPort    int
-	OutputCallback func(nodeID string, line string)
-	StatusCallback func(nodeID string, status NodeStatus)
+	ValidatorPath   string
+	DataDir         string
+	BasePort        int
+	BaseAPIPort     int
+	OutputCallback  func(nodeID string, line string)
+	StatusCallback  func(nodeID string, status NodeStatus)
+	ClusterCallback func(status ClusterStatus, nodesStarted int, nodesTotal int)
 }
 
 // NewNodeManager creates a new node manager
@@ -121,25 +138,42 @@ func NewNodeManager(cfg *NodeManagerConfig) *NodeManager {
 	}
 
 	return &NodeManager{
-		nodes:          make(map[string]*ManagedNode),
-		validatorPath:  cfg.ValidatorPath,
-		dataDir:        cfg.DataDir,
-		basePort:       cfg.BasePort,
-		baseAPIPort:    cfg.BaseAPIPort,
-		outputCallback: cfg.OutputCallback,
-		statusCallback: cfg.StatusCallback,
+		nodes:           make(map[string]*ManagedNode),
+		validatorPath:   cfg.ValidatorPath,
+		dataDir:         cfg.DataDir,
+		basePort:        cfg.BasePort,
+		baseAPIPort:     cfg.BaseAPIPort,
+		outputCallback:  cfg.OutputCallback,
+		statusCallback:  cfg.StatusCallback,
+		clusterCallback: cfg.ClusterCallback,
+		clusterStatus:   ClusterStatusIdle,
 	}
 }
 
 // StartNode starts a single validator node
 func (m *NodeManager) StartNode(nodeID string, isPrimary bool, isBootstrap bool, bootstrapAddr string) error {
+	return m.startNodeWithTotal(nodeID, isPrimary, isBootstrap, bootstrapAddr, 0)
+}
+
+// startNodeWithTotal starts a single validator node with a specific total node count.
+// If targetTotal is 0, it uses len(m.nodes) as the total (for single-node additions).
+func (m *NodeManager) startNodeWithTotal(nodeID string, isPrimary bool, isBootstrap bool, bootstrapAddr string, targetTotal int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	// Check if node already exists and is running
 	if existing, ok := m.nodes[nodeID]; ok {
-		if existing.Status == NodeStatusRunning || existing.Status == NodeStatusStarting {
-			return fmt.Errorf("node %s is already running", nodeID)
+		existing.mu.RLock()
+		status := existing.Status
+		existing.mu.RUnlock()
+
+		if status == NodeStatusRunning || status == NodeStatusStarting {
+			return fmt.Errorf("node %s is already running (status: %s)", nodeID, status)
+		}
+		// If node is stopped or error state, we'll restart it by removing and recreating
+		if status == NodeStatusStopped || status == NodeStatusError {
+			// Clean up the old node entry
+			delete(m.nodes, nodeID)
 		}
 	}
 
@@ -164,7 +198,13 @@ func (m *NodeManager) StartNode(nodeID string, isPrimary bool, isBootstrap bool,
 		outputBuf:   NewOutputBuffer(1000),
 	}
 	m.nodes[nodeID] = node
-	m.totalNodes = len(m.nodes)
+
+	// Use the target total if specified (cluster start), otherwise use current count
+	if targetTotal > 0 {
+		m.totalNodes = targetTotal
+	} else {
+		m.totalNodes = len(m.nodes)
+	}
 
 	// Start the node process asynchronously
 	go m.startNodeProcess(node, bootstrapAddr)
@@ -397,20 +437,54 @@ func (m *NodeManager) GetNodeLogs(nodeID string) ([]string, error) {
 	return node.outputBuf.GetLines(), nil
 }
 
-// StartCluster starts a cluster of nodes
+// StartCluster starts a cluster of nodes asynchronously.
+// It returns immediately and starts nodes in the background, sending progress
+// updates via the cluster callback and WebSocket status events.
 func (m *NodeManager) StartCluster(nodeCount int) error {
 	if nodeCount < 1 {
 		return fmt.Errorf("node count must be at least 1")
 	}
 
-	// Start bootstrap node first
-	bootstrapID := "node0"
-	if err := m.StartNode(bootstrapID, true, true, ""); err != nil {
-		return fmt.Errorf("failed to start bootstrap node: %w", err)
+	// Prevent concurrent cluster operations
+	if !m.clusterMu.TryLock() {
+		return fmt.Errorf("cluster operation already in progress")
 	}
 
-	// Wait for bootstrap node to start
-	time.Sleep(2 * time.Second)
+	// Stop any existing nodes first to ensure clean state
+	m.StopAllNodes()
+
+	// Wait for all node processes to fully exit
+	m.waitForAllStopped(3 * time.Second)
+
+	// Clear the nodes map to start fresh
+	m.mu.Lock()
+	m.nodes = make(map[string]*ManagedNode)
+	m.totalNodes = nodeCount // Set the correct total upfront
+	m.clusterStatus = ClusterStatusStarting
+	m.mu.Unlock()
+
+	m.notifyCluster(ClusterStatusStarting, 0, nodeCount)
+
+	// Launch async cluster startup
+	go m.startClusterAsync(nodeCount)
+
+	return nil
+}
+
+// startClusterAsync performs the actual cluster startup in the background
+func (m *NodeManager) startClusterAsync(nodeCount int) {
+	defer m.clusterMu.Unlock()
+
+	// Start bootstrap node first
+	bootstrapID := "node0"
+	if err := m.startNodeWithTotal(bootstrapID, true, true, "", nodeCount); err != nil {
+		m.notifyCluster(ClusterStatusIdle, 0, nodeCount)
+		fmt.Printf("Cluster: Failed to start bootstrap node: %v\n", err)
+		return
+	}
+
+	// Wait for bootstrap node process to actually start
+	m.waitForNodeRunning(bootstrapID, 5*time.Second)
 
 	// Get bootstrap address
 	m.mu.RLock()
@@ -418,23 +492,138 @@ func (m *NodeManager) StartCluster(nodeCount int) error {
 	m.mu.RUnlock()
 
 	if bootstrapNode == nil {
-		return fmt.Errorf("bootstrap node not found after starting")
+		m.notifyCluster(ClusterStatusIdle, 0, nodeCount)
+		fmt.Printf("Cluster: Bootstrap node not found after starting\n")
+		return
 	}
 
-	// Construct bootstrap address (nodes will need to discover the peer ID)
-	bootstrapAddr := fmt.Sprintf("/ip4/127.0.0.1/tcp/%d", bootstrapNode.Port)
+	// Derive the bootstrap node's deterministic peer ID so other nodes can connect.
+	// libp2p requires the peer ID in the multiaddr for dialing.
+	privKey, err := network.GenerateDeterministicKey(bootstrapID)
+	if err != nil {
+		m.notifyCluster(ClusterStatusIdle, 0, nodeCount)
+		fmt.Printf("Cluster: Failed to derive bootstrap peer ID: %v\n", err)
+		return
+	}
+	peerID, err := peer.IDFromPrivateKey(privKey)
+	if err != nil {
+		m.notifyCluster(ClusterStatusIdle, 0, nodeCount)
+		fmt.Printf("Cluster: Failed to derive bootstrap peer ID: %v\n", err)
+		return
+	}
+	bootstrapAddr := fmt.Sprintf("/ip4/127.0.0.1/tcp/%d/p2p/%s", bootstrapNode.Port, peerID)
 
-	// Start remaining nodes
-	for i := 1; i < nodeCount; i++ {
-		nodeID := fmt.Sprintf("node%d", i)
-		if err := m.StartNode(nodeID, false, false, bootstrapAddr); err != nil {
-			return fmt.Errorf("failed to start node %s: %w", nodeID, err)
+	// Start remaining nodes concurrently in batches
+	// Batch size limits concurrent process spawns to avoid resource contention
+	batchSize := 10
+	nodesStarted := 1 // bootstrap already started
+
+	for batchStart := 1; batchStart < nodeCount; batchStart += batchSize {
+		batchEnd := batchStart + batchSize
+		if batchEnd > nodeCount {
+			batchEnd = nodeCount
 		}
-		// Small delay between node starts
-		time.Sleep(500 * time.Millisecond)
+
+		var wg sync.WaitGroup
+		for i := batchStart; i < batchEnd; i++ {
+			wg.Add(1)
+			nodeID := fmt.Sprintf("node%d", i)
+			go func(id string) {
+				defer wg.Done()
+				if err := m.startNodeWithTotal(id, false, false, bootstrapAddr, nodeCount); err != nil {
+					fmt.Printf("Cluster: Failed to start node %s: %v\n", id, err)
+				}
+			}(nodeID)
+		}
+		wg.Wait()
+
+		nodesStarted += batchEnd - batchStart
+		m.notifyCluster(ClusterStatusStarting, nodesStarted, nodeCount)
+
+		// Brief pause between batches to let processes initialize
+		if batchEnd < nodeCount {
+			time.Sleep(200 * time.Millisecond)
+		}
 	}
 
-	return nil
+	m.mu.Lock()
+	m.clusterStatus = ClusterStatusRunning
+	m.mu.Unlock()
+
+	m.notifyCluster(ClusterStatusRunning, nodeCount, nodeCount)
+	fmt.Printf("Cluster: All %d nodes started\n", nodeCount)
+}
+
+// waitForNodeRunning waits until a specific node reaches Running status
+func (m *NodeManager) waitForNodeRunning(nodeID string, timeout time.Duration) {
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			return
+		case <-ticker.C:
+			m.mu.RLock()
+			node, ok := m.nodes[nodeID]
+			m.mu.RUnlock()
+			if !ok {
+				continue
+			}
+			node.mu.RLock()
+			status := node.Status
+			node.mu.RUnlock()
+			if status == NodeStatusRunning {
+				return
+			}
+		}
+	}
+}
+
+// waitForAllStopped waits until all nodes have fully stopped
+func (m *NodeManager) waitForAllStopped(timeout time.Duration) {
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-deadline:
+			return
+		case <-ticker.C:
+			m.mu.RLock()
+			allStopped := true
+			for _, node := range m.nodes {
+				node.mu.RLock()
+				if node.Status == NodeStatusRunning || node.Status == NodeStatusStarting || node.Status == NodeStatusStopping {
+					allStopped = false
+				}
+				node.mu.RUnlock()
+				if !allStopped {
+					break
+				}
+			}
+			m.mu.RUnlock()
+			if allStopped {
+				return
+			}
+		}
+	}
+}
+
+// notifyCluster sends cluster status updates via callback
+func (m *NodeManager) notifyCluster(status ClusterStatus, nodesStarted int, nodesTotal int) {
+	if m.clusterCallback != nil {
+		m.clusterCallback(status, nodesStarted, nodesTotal)
+	}
+}
+
+// GetClusterStatus returns the current cluster status
+func (m *NodeManager) GetClusterStatus() ClusterStatus {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.clusterStatus
 }
 
 // RemoveNode removes a node from management (must be stopped first)
