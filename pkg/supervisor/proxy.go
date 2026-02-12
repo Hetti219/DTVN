@@ -279,6 +279,92 @@ func (s *Server) handleProxySeedTickets(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+// handleProxyValidateTicketViaNode routes a validation request to a specific node
+// instead of always going to the primary. This allows testing scenarios like
+// double validation, non-primary validation (gossip forwarding), etc.
+func (s *Server) handleProxyValidateTicketViaNode(w http.ResponseWriter, r *http.Request) {
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, "Failed to read request body")
+		return
+	}
+
+	var reqBody struct {
+		TicketID string `json:"ticket_id"`
+		NodeID   string `json:"node_id"`
+	}
+	if err := json.Unmarshal(bodyBytes, &reqBody); err != nil {
+		s.writeError(w, http.StatusBadRequest, "Invalid request body")
+		return
+	}
+
+	if reqBody.TicketID == "" {
+		s.writeError(w, http.StatusBadRequest, "ticket_id is required")
+		return
+	}
+	if reqBody.NodeID == "" {
+		s.writeError(w, http.StatusBadRequest, "node_id is required")
+		return
+	}
+
+	// Look up the target node
+	node, err := s.nodeManager.GetNode(reqBody.NodeID)
+	if err != nil {
+		s.writeError(w, http.StatusNotFound, fmt.Sprintf("Node not found: %s", reqBody.NodeID))
+		return
+	}
+	if node.Status != NodeStatusRunning {
+		s.writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("Node %s is not running (status: %s)", reqBody.NodeID, node.Status))
+		return
+	}
+
+	nodeURL := fmt.Sprintf("http://127.0.0.1:%d", node.APIPort)
+	if !s.isNodeReachable(nodeURL) {
+		s.writeError(w, http.StatusServiceUnavailable, fmt.Sprintf("Node %s is not reachable yet", reqBody.NodeID))
+		return
+	}
+
+	// Proxy the validate request to the specific node
+	validateBody, _ := json.Marshal(map[string]string{"ticket_id": reqBody.TicketID})
+	targetURL := fmt.Sprintf("%s/api/v1/tickets/validate", nodeURL)
+	proxyReq, err := http.NewRequest("POST", targetURL, bytes.NewReader(validateBody))
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Failed to create proxy request")
+		return
+	}
+	proxyReq.Header.Set("Content-Type", "application/json")
+	if s.apiKey != "" {
+		proxyReq.Header.Set("X-API-Key", s.apiKey)
+	}
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to connect to node %s: %v", reqBody.NodeID, err))
+		return
+	}
+	defer resp.Body.Close()
+
+	// Copy response
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+
+	// Broadcast WebSocket event on success
+	if resp.StatusCode == http.StatusOK {
+		s.broadcastWSMessage(map[string]interface{}{
+			"type":      "ticket_validated",
+			"ticket_id": reqBody.TicketID,
+			"node_id":   reqBody.NodeID,
+			"timestamp": time.Now().Unix(),
+		})
+	}
+}
+
 // Ticket proxy handlers
 
 func (s *Server) handleProxyGetAllTickets(w http.ResponseWriter, r *http.Request) {
@@ -392,4 +478,18 @@ func (s *Server) handleProxyGetConfig(w http.ResponseWriter, r *http.Request) {
 
 	s.proxyRequest(w, r, "/config")
 	_ = nodeURL // used in proxyRequest
+}
+
+// Advanced inspection proxy handlers
+
+func (s *Server) handleProxyGetConsensusLogs(w http.ResponseWriter, r *http.Request) {
+	s.proxyRequest(w, r, "/consensus/logs")
+}
+
+func (s *Server) handleProxyGetNodeCrypto(w http.ResponseWriter, r *http.Request) {
+	s.proxyRequest(w, r, "/node/crypto")
+}
+
+func (s *Server) handleProxyGetStorageEntries(w http.ResponseWriter, r *http.Request) {
+	s.proxyRequest(w, r, "/storage/entries")
 }
