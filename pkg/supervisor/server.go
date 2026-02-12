@@ -163,6 +163,7 @@ func (s *Server) setupRoutes() {
 	// Ticket proxy endpoints (forward to running validator nodes)
 	api.HandleFunc("/tickets", s.handleProxyGetAllTickets).Methods("GET")
 	api.HandleFunc("/tickets/validate", s.handleProxyValidateTicket).Methods("POST")
+	api.HandleFunc("/tickets/validate-via-node", s.handleProxyValidateTicketViaNode).Methods("POST")
 	api.HandleFunc("/tickets/consume", s.handleProxyConsumeTicket).Methods("POST")
 	api.HandleFunc("/tickets/dispute", s.handleProxyDisputeTicket).Methods("POST")
 	api.HandleFunc("/tickets/seed", s.handleProxySeedTickets).Methods("POST")
@@ -176,6 +177,11 @@ func (s *Server) setupRoutes() {
 
 	// Config proxy endpoint
 	api.HandleFunc("/config", s.handleProxyGetConfig).Methods("GET")
+
+	// Advanced inspection proxy endpoints
+	api.HandleFunc("/consensus/logs", s.handleProxyGetConsensusLogs).Methods("GET")
+	api.HandleFunc("/node/crypto", s.handleProxyGetNodeCrypto).Methods("GET")
+	api.HandleFunc("/storage/entries", s.handleProxyGetStorageEntries).Methods("GET")
 
 	// Supervisor status
 	api.HandleFunc("/status", s.handleGetStatus).Methods("GET")
