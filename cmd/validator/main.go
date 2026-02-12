@@ -1111,6 +1111,83 @@ func (n *ValidatorNode) GetConfig() (interface{}, error) {
 	}, nil
 }
 
+func (n *ValidatorNode) GetConsensusLogs() ([]interface{}, error) {
+	logs, err := n.storage.GetConsensusLogs()
+	if err != nil {
+		return nil, err
+	}
+	result := make([]interface{}, len(logs))
+	for i, l := range logs {
+		result[i] = l
+	}
+	return result, nil
+}
+
+func (n *ValidatorNode) GetNodeCryptoInfo() map[string]interface{} {
+	peerID := n.p2pHost.ID()
+
+	// Extract the public key from the peer ID
+	pubKey, err := peerID.ExtractPublicKey()
+	publicKeyHex := ""
+	keyAlgorithm := "Ed25519"
+	if err == nil && pubKey != nil {
+		raw, err := pubKey.Raw()
+		if err == nil {
+			publicKeyHex = fmt.Sprintf("%x", raw)
+		}
+	}
+
+	// Collect listen addresses
+	addrs := n.p2pHost.Addrs()
+	addrStrs := make([]string, len(addrs))
+	for i, a := range addrs {
+		addrStrs[i] = a.String()
+	}
+
+	return map[string]interface{}{
+		"node_id":            n.nodeID,
+		"peer_id":            peerID.String(),
+		"public_key":         publicKeyHex,
+		"key_algorithm":      keyAlgorithm,
+		"transport_security": []string{"noise", "tls-1.3"},
+		"listen_addresses":   addrStrs,
+	}
+}
+
+func (n *ValidatorNode) GetStorageEntries() map[string]interface{} {
+	// Ticket counts by state
+	allTickets := n.stateMachine.GetAllTickets()
+	stateCounts := map[string]int{
+		"ISSUED": 0, "VALIDATED": 0, "CONSUMED": 0, "DISPUTED": 0,
+	}
+	for _, t := range allTickets {
+		stateCounts[string(t.State)]++
+	}
+
+	// Consensus log count
+	consensusLogs, _ := n.storage.GetConsensusLogs()
+	consensusLogCount := 0
+	if consensusLogs != nil {
+		consensusLogCount = len(consensusLogs)
+	}
+
+	// Latest checkpoint
+	var latestCheckpoint interface{}
+	cp, err := n.storage.GetLatestCheckpoint()
+	if err == nil {
+		latestCheckpoint = cp
+	}
+
+	return map[string]interface{}{
+		"node_id":             n.nodeID,
+		"total_tickets":       len(allTickets),
+		"ticket_states":       stateCounts,
+		"consensus_log_count": consensusLogCount,
+		"latest_checkpoint":   latestCheckpoint,
+		"db_stats":            n.storage.GetStats(),
+	}
+}
+
 // persistTicket saves a ticket's current state to BoltDB for crash recovery.
 func (n *ValidatorNode) persistTicket(ticketID string) {
 	ticket, err := n.stateMachine.GetTicket(ticketID)
