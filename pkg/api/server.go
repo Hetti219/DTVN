@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -80,9 +82,7 @@ func NewServer(ctx context.Context, cfg *Config, validator ValidatorInterface) (
 		validator: validator,
 		wsClients: make(map[*websocket.Conn]bool),
 		wsUpgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				return cfg.EnableCORS // Allow all origins if CORS enabled
-			},
+			CheckOrigin: checkWSOrigin,
 		},
 		broadcast: make(chan interface{}, 100),
 		ctx:       serverCtx,
@@ -385,6 +385,45 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// checkWSOrigin validates WebSocket connection origins to prevent cross-site
+// WebSocket hijacking. Allows same-origin, localhost, and origins listed in
+// the DTVN_WS_ORIGINS environment variable (comma-separated).
+// Requests without an Origin header (non-browser clients) are always allowed.
+func checkWSOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // Non-browser clients (curl, websocat) don't send Origin
+	}
+
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+
+	// Same-origin check
+	if strings.EqualFold(u.Host, r.Host) {
+		return true
+	}
+
+	// Allow localhost origins for development
+	originHost := u.Hostname()
+	if originHost == "localhost" || originHost == "127.0.0.1" || originHost == "::1" {
+		return true
+	}
+
+	// Check additional allowed origins from environment
+	if allowed := os.Getenv("DTVN_WS_ORIGINS"); allowed != "" {
+		for _, a := range strings.Split(allowed, ",") {
+			a = strings.TrimSpace(a)
+			if a != "" && strings.EqualFold(origin, a) {
+				return true
+			}
+		}
+	}
+
+	return false
 }
 
 // apiKeyMiddleware enforces API key authentication when an API key is configured.
