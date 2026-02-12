@@ -20,6 +20,30 @@ export class TicketManager {
                 </div>
             </div>
 
+            <!-- Manual Validation Panel -->
+            <div class="card" style="margin-bottom: 1.5rem;">
+                <div class="card-header">
+                    <h3 class="card-title">Manual Validation</h3>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted" style="margin-bottom: 1rem;">Validate a ticket via a specific node. Use this to test scenarios like double validation, non-primary node validation, etc.</p>
+                    <div style="display: flex; gap: 0.75rem; align-items: flex-end; flex-wrap: wrap;">
+                        <div style="flex: 1; min-width: 200px;">
+                            <label style="display: block; margin-bottom: 0.25rem; font-size: 0.85rem; color: var(--text-secondary, #71767B);">Ticket ID</label>
+                            <input type="text" id="manual-ticket-id" class="form-input" placeholder="e.g. TICKET-001" style="width: 100%;">
+                        </div>
+                        <div style="flex: 1; min-width: 200px;">
+                            <label style="display: block; margin-bottom: 0.25rem; font-size: 0.85rem; color: var(--text-secondary, #71767B);">Target Node</label>
+                            <select id="manual-node-select" class="form-select" style="width: 100%;">
+                                <option value="">Loading nodes...</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-primary" id="manual-validate-btn">Validate</button>
+                    </div>
+                    <div id="manual-validate-result" style="margin-top: 0.75rem;"></div>
+                </div>
+            </div>
+
             <!-- Ticket List -->
             <div class="card">
                 <div class="card-header">
@@ -48,6 +72,11 @@ export class TicketManager {
             this.handleSeedTickets();
         });
 
+        // Setup manual validation handler
+        document.getElementById('manual-validate-btn').addEventListener('click', () => {
+            this.handleManualValidate();
+        });
+
         // Setup filter and search
         document.getElementById('ticket-filter').addEventListener('change', (e) => {
             this.filterState = e.target.value;
@@ -59,8 +88,63 @@ export class TicketManager {
             this.renderTicketList();
         });
 
+        // Load node list for the dropdown
+        this.loadNodeList();
+
         // Load tickets
         await this.loadTickets();
+    }
+
+    async loadNodeList() {
+        try {
+            const nodes = await this.api.getNodeList();
+            const select = document.getElementById('manual-node-select');
+            if (!select) return;
+
+            const runningNodes = (nodes || []).filter(n => n.status === 'running');
+            if (runningNodes.length === 0) {
+                select.innerHTML = '<option value="">No running nodes</option>';
+                return;
+            }
+
+            select.innerHTML = runningNodes.map(n =>
+                `<option value="${n.id}">${n.id}${n.is_primary ? ' (Primary)' : ''} — port ${n.api_port}</option>`
+            ).join('');
+        } catch (error) {
+            const select = document.getElementById('manual-node-select');
+            if (select) select.innerHTML = '<option value="">Failed to load nodes</option>';
+        }
+    }
+
+    async handleManualValidate() {
+        const ticketID = document.getElementById('manual-ticket-id')?.value?.trim();
+        const nodeID = document.getElementById('manual-node-select')?.value;
+        const resultDiv = document.getElementById('manual-validate-result');
+        const btn = document.getElementById('manual-validate-btn');
+
+        if (!ticketID) {
+            resultDiv.innerHTML = '<span class="inline-feedback error">Please enter a Ticket ID</span>';
+            return;
+        }
+        if (!nodeID) {
+            resultDiv.innerHTML = '<span class="inline-feedback error">Please select a node</span>';
+            return;
+        }
+
+        btn.disabled = true;
+        btn.textContent = 'Validating...';
+        resultDiv.innerHTML = '';
+
+        try {
+            await this.api.validateTicketViaNode(ticketID, nodeID);
+            resultDiv.innerHTML = `<span class="inline-feedback success">Ticket ${ticketID} validated via ${nodeID}</span>`;
+            await this.loadTickets();
+        } catch (error) {
+            resultDiv.innerHTML = `<span class="inline-feedback error">${error.message}</span>`;
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Validate';
+        }
     }
 
     async handleSeedTickets() {
@@ -202,6 +286,9 @@ export class TicketManager {
     handleWSEvent(event) {
         if (event.type.startsWith('ticket_') || event.type === 'tickets_seeded') {
             this.loadTickets();
+        }
+        if (event.type === 'node_status' || event.type === 'cluster_status') {
+            this.loadNodeList();
         }
     }
 }
