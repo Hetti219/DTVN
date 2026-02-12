@@ -42,7 +42,6 @@ type Config struct {
 	NodeID         string
 	ListenPort     int
 	APIPort        int
-	APIAddr        string
 	DataDir        string
 	BootstrapPeers []string
 	IsBootstrap    bool
@@ -62,7 +61,6 @@ func main() {
 	isPrimary := flag.Bool("primary", false, "Run as primary (leader) node")
 	totalNodes := flag.Int("total-nodes", 4, "Total number of validator nodes")
 	apiKey := flag.String("api-key", "", "API key for authentication (or set DTVN_API_KEY env var)")
-	apiAddr := flag.String("api-addr", "127.0.0.1", "API server bind address")
 	flag.Parse()
 
 	// Fall back to environment variable for API key
@@ -75,7 +73,6 @@ func main() {
 		NodeID:      *nodeID,
 		ListenPort:  *listenPort,
 		APIPort:     *apiPort,
-		APIAddr:     *apiAddr,
 		DataDir:     *dataDir,
 		IsBootstrap: *isBootstrap,
 		IsPrimary:   *isPrimary,
@@ -256,7 +253,7 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 
 	// Initialize API server
 	apiServer, err := api.NewServer(ctx, &api.Config{
-		Address:    cfg.APIAddr,
+		Address:    "0.0.0.0",
 		Port:       cfg.APIPort,
 		EnableCORS: true,
 		APIKey:     cfg.APIKey,
