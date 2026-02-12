@@ -225,6 +225,9 @@ func (s *Server) handleProxySeedTickets(w http.ResponseWriter, r *http.Request) 
 			lastErr = err
 			continue
 		}
+		if s.apiKey != "" {
+			req.Header.Set("X-API-Key", s.apiKey)
+		}
 
 		client := &http.Client{Timeout: 10 * time.Second}
 		resp, err := client.Do(req)
@@ -320,7 +323,15 @@ func (s *Server) handleProxyGetStats(w http.ResponseWriter, r *http.Request) {
 
 	// Proxy to running node
 	targetURL := fmt.Sprintf("%s/api/v1/stats", nodeURL)
-	resp, err := http.Get(targetURL)
+	statsReq, err := http.NewRequest("GET", targetURL, nil)
+	if err != nil {
+		s.writeError(w, http.StatusBadGateway, "Failed to get stats from node")
+		return
+	}
+	if s.apiKey != "" {
+		statsReq.Header.Set("X-API-Key", s.apiKey)
+	}
+	resp, err := (&http.Client{}).Do(statsReq)
 	if err != nil {
 		s.writeError(w, http.StatusBadGateway, "Failed to get stats from node")
 		return

@@ -20,32 +20,6 @@ export class TicketManager {
                 </div>
             </div>
 
-            <!-- Validate Ticket Form -->
-            <div class="card">
-                <div class="card-header">
-                    <h3 class="card-title">Validate Ticket</h3>
-                </div>
-                <div class="card-body">
-                    <form id="validate-ticket-form">
-                        <div class="form-group">
-                            <label class="form-label" for="ticket-id">Ticket ID</label>
-                            <input type="text" id="ticket-id" class="form-input" placeholder="TICKET-001" required>
-                            <span class="form-help">Enter an issued ticket ID (e.g. TICKET-001 through TICKET-500)</span>
-                        </div>
-
-                        <div class="form-group">
-                            <label class="form-label" for="ticket-data">Data (JSON)</label>
-                            <textarea id="ticket-data" class="form-textarea" placeholder='{"event": "concert", "seat": "A1"}'></textarea>
-                            <span class="form-help">Optional ticket metadata in JSON format</span>
-                        </div>
-
-                        <div id="validation-result"></div>
-
-                        <button type="submit" class="btn btn-primary">Validate Ticket</button>
-                    </form>
-                </div>
-            </div>
-
             <!-- Ticket List -->
             <div class="card">
                 <div class="card-header">
@@ -72,12 +46,6 @@ export class TicketManager {
         // Setup seed button handler
         document.getElementById('seed-tickets-btn').addEventListener('click', () => {
             this.handleSeedTickets();
-        });
-
-        // Setup form handler
-        document.getElementById('validate-ticket-form').addEventListener('submit', (e) => {
-            e.preventDefault();
-            this.handleValidateTicket();
         });
 
         // Setup filter and search
@@ -113,37 +81,6 @@ export class TicketManager {
         } finally {
             btn.disabled = false;
             btn.textContent = 'Seed 500 Tickets';
-        }
-    }
-
-    async handleValidateTicket() {
-        const ticketID = document.getElementById('ticket-id').value;
-        const dataStr = document.getElementById('ticket-data').value;
-        const resultDiv = document.getElementById('validation-result');
-
-        // Parse data
-        let data = null;
-        if (dataStr.trim()) {
-            try {
-                data = JSON.parse(dataStr);
-            } catch (error) {
-                resultDiv.innerHTML = '<div class="alert alert-error">Invalid JSON data</div>';
-                return;
-            }
-        }
-
-        try {
-            resultDiv.innerHTML = '<div class="alert alert-info">Validating ticket...</div>';
-
-            const dataBase64 = data ? btoa(JSON.stringify(data)) : null;
-            await this.api.validateTicket(ticketID, dataBase64);
-
-            // If we get here, validation succeeded (no exception thrown)
-            resultDiv.innerHTML = '<div class="alert alert-success">Ticket validated successfully!</div>';
-            document.getElementById('validate-ticket-form').reset();
-            await this.loadTickets();
-        } catch (error) {
-            resultDiv.innerHTML = `<div class="alert alert-error">Error: ${error.message}</div>`;
         }
     }
 

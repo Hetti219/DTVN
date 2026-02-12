@@ -2,11 +2,14 @@ package supervisor
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +29,7 @@ type Server struct {
 	wsWriteMu      sync.Mutex // Serializes WebSocket writes to prevent concurrent write panic
 	wsUpgrader     websocket.Upgrader
 	staticDir      string
+	apiKey         string
 }
 
 // ServerConfig holds server configuration
@@ -36,6 +40,7 @@ type ServerConfig struct {
 	SimulatorPath string
 	DataDir       string
 	StaticDir     string
+	APIKey        string // Optional API key for authentication (empty = no auth)
 }
 
 // NewServer creates a new supervisor server
@@ -54,12 +59,11 @@ func NewServer(cfg *ServerConfig) *Server {
 		router:    mux.NewRouter(),
 		wsClients: make(map[*websocket.Conn]bool),
 		staticDir: cfg.StaticDir,
+		apiKey:    cfg.APIKey,
 		wsUpgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
-			CheckOrigin: func(r *http.Request) bool {
-				return true // Allow all origins for development
-			},
+			CheckOrigin:     checkSupervisorWSOrigin,
 		},
 	}
 
@@ -67,6 +71,7 @@ func NewServer(cfg *ServerConfig) *Server {
 	s.nodeManager = NewNodeManager(&NodeManagerConfig{
 		ValidatorPath: cfg.ValidatorPath,
 		DataDir:       cfg.DataDir,
+		APIKey:        cfg.APIKey,
 		OutputCallback: func(nodeID string, line string) {
 			s.broadcastWSMessage(map[string]interface{}{
 				"type":    "node_output",
@@ -177,6 +182,11 @@ func (s *Server) setupRoutes() {
 
 	// WebSocket endpoint
 	s.router.HandleFunc("/ws", s.handleWebSocket)
+
+	// Middleware
+	if s.apiKey != "" {
+		s.router.Use(s.apiKeyMiddleware)
+	}
 
 	// Static file serving (must be last)
 	s.setupStaticRoutes()
@@ -539,6 +549,80 @@ func (s *Server) broadcastWSMessage(msg map[string]interface{}) {
 	for _, conn := range clients {
 		conn.WriteJSON(msg)
 	}
+}
+
+// checkSupervisorWSOrigin validates WebSocket connection origins to prevent cross-site
+// WebSocket hijacking. Allows same-origin, localhost, and origins listed in
+// the DTVN_WS_ORIGINS environment variable (comma-separated).
+// Requests without an Origin header (non-browser clients) are always allowed.
+func checkSupervisorWSOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // Non-browser clients (curl, websocat) don't send Origin
+	}
+
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+
+	// Same-origin check
+	if strings.EqualFold(u.Host, r.Host) {
+		return true
+	}
+
+	// Allow localhost origins for development
+	originHost := u.Hostname()
+	if originHost == "localhost" || originHost == "127.0.0.1" || originHost == "::1" {
+		return true
+	}
+
+	// Check additional allowed origins from environment
+	if allowed := os.Getenv("DTVN_WS_ORIGINS"); allowed != "" {
+		for _, a := range strings.Split(allowed, ",") {
+			a = strings.TrimSpace(a)
+			if a != "" && strings.EqualFold(origin, a) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// apiKeyMiddleware enforces API key authentication when an API key is configured.
+// Exempt paths: /ws (WebSocket) and static files (non-/api/ paths).
+func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Exempt WebSocket and static file paths
+		if path == "/ws" || !strings.HasPrefix(path, "/api/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check X-API-Key header first, then Authorization: Bearer
+		key := r.Header.Get("X-API-Key")
+		if key == "" {
+			auth := r.Header.Get("Authorization")
+			if strings.HasPrefix(auth, "Bearer ") {
+				key = strings.TrimPrefix(auth, "Bearer ")
+			}
+		}
+
+		// Constant-time comparison to prevent timing attacks
+		if subtle.ConstantTimeCompare([]byte(key), []byte(s.apiKey)) != 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(map[string]string{
+				"error": "Invalid or missing API key",
+			})
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Helper methods

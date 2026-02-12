@@ -47,6 +47,7 @@ type Config struct {
 	IsBootstrap    bool
 	IsPrimary      bool
 	TotalNodes     int
+	APIKey         string
 }
 
 func main() {
@@ -59,7 +60,13 @@ func main() {
 	isBootstrap := flag.Bool("bootstrap-node", false, "Run as bootstrap node")
 	isPrimary := flag.Bool("primary", false, "Run as primary (leader) node")
 	totalNodes := flag.Int("total-nodes", 4, "Total number of validator nodes")
+	apiKey := flag.String("api-key", "", "API key for authentication (or set DTVN_API_KEY env var)")
 	flag.Parse()
+
+	// Fall back to environment variable for API key
+	if *apiKey == "" {
+		*apiKey = os.Getenv("DTVN_API_KEY")
+	}
 
 	// Create configuration
 	cfg := &Config{
@@ -70,6 +77,7 @@ func main() {
 		IsBootstrap: *isBootstrap,
 		IsPrimary:   *isPrimary,
 		TotalNodes:  *totalNodes,
+		APIKey:      *apiKey,
 	}
 
 	// Parse bootstrap peers (comma-separated)
@@ -248,6 +256,7 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 		Address:    "0.0.0.0",
 		Port:       cfg.APIPort,
 		EnableCORS: true,
+		APIKey:     cfg.APIKey,
 	}, node)
 	if err != nil {
 		node.Stop()

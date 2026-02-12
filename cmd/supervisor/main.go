@@ -22,7 +22,13 @@ func main() {
 	simulatorPath := flag.String("simulator", "", "Path to simulator binary (auto-detected if empty)")
 	staticDir := flag.String("static-dir", "", "Path to static files directory (auto-detected if empty)")
 	autoStart := flag.Int("auto-start", 0, "Auto-start this many nodes on startup (0 = disabled)")
+	apiKey := flag.String("api-key", "", "API key for authentication (or set DTVN_API_KEY env var)")
 	flag.Parse()
+
+	// Fall back to environment variable for API key
+	if *apiKey == "" {
+		*apiKey = os.Getenv("DTVN_API_KEY")
+	}
 
 	fmt.Println("=== DTVN Supervisor ===")
 	fmt.Println("Distributed Ticket Validation Network - Web Interface")
@@ -70,6 +76,7 @@ func main() {
 		SimulatorPath: *simulatorPath,
 		DataDir:       *dataDir,
 		StaticDir:     *staticDir,
+		APIKey:        *apiKey,
 	})
 
 	// Auto-start cluster if requested

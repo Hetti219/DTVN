@@ -2,9 +2,13 @@ package api
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +27,7 @@ type Server struct {
 	broadcast   chan interface{}
 	ctx         context.Context
 	cancel      context.CancelFunc
+	apiKey      string
 }
 
 // ValidatorInterface defines the interface for validator operations
@@ -40,9 +45,10 @@ type ValidatorInterface interface {
 
 // Config holds API server configuration
 type Config struct {
-	Address   string
-	Port      int
+	Address    string
+	Port       int
 	EnableCORS bool
+	APIKey     string // Optional API key for authentication (empty = no auth)
 }
 
 // Request/Response structures
@@ -76,13 +82,12 @@ func NewServer(ctx context.Context, cfg *Config, validator ValidatorInterface) (
 		validator: validator,
 		wsClients: make(map[*websocket.Conn]bool),
 		wsUpgrader: websocket.Upgrader{
-			CheckOrigin: func(r *http.Request) bool {
-				return cfg.EnableCORS // Allow all origins if CORS enabled
-			},
+			CheckOrigin: checkWSOrigin,
 		},
 		broadcast: make(chan interface{}, 100),
 		ctx:       serverCtx,
 		cancel:    cancel,
+		apiKey:    cfg.APIKey,
 	}
 
 	// Setup routes
@@ -135,6 +140,9 @@ func (s *Server) setupRoutes() {
 	s.router.Use(s.loggingMiddleware)
 	if s.wsUpgrader.CheckOrigin != nil {
 		s.router.Use(s.corsMiddleware)
+	}
+	if s.apiKey != "" {
+		s.router.Use(s.apiKeyMiddleware)
 	}
 }
 
@@ -368,10 +376,80 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-API-Key")
 
 		if r.Method == "OPTIONS" {
 			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// checkWSOrigin validates WebSocket connection origins to prevent cross-site
+// WebSocket hijacking. Allows same-origin, localhost, and origins listed in
+// the DTVN_WS_ORIGINS environment variable (comma-separated).
+// Requests without an Origin header (non-browser clients) are always allowed.
+func checkWSOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true // Non-browser clients (curl, websocat) don't send Origin
+	}
+
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+
+	// Same-origin check
+	if strings.EqualFold(u.Host, r.Host) {
+		return true
+	}
+
+	// Allow localhost origins for development
+	originHost := u.Hostname()
+	if originHost == "localhost" || originHost == "127.0.0.1" || originHost == "::1" {
+		return true
+	}
+
+	// Check additional allowed origins from environment
+	if allowed := os.Getenv("DTVN_WS_ORIGINS"); allowed != "" {
+		for _, a := range strings.Split(allowed, ",") {
+			a = strings.TrimSpace(a)
+			if a != "" && strings.EqualFold(origin, a) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// apiKeyMiddleware enforces API key authentication when an API key is configured.
+// Exempt paths: /health, /ws, and static files (non-/api/ paths).
+func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Exempt health check, WebSocket, and static file paths
+		if path == "/health" || path == "/ws" || !strings.HasPrefix(path, "/api/") {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		// Check X-API-Key header first, then Authorization: Bearer
+		key := r.Header.Get("X-API-Key")
+		if key == "" {
+			auth := r.Header.Get("Authorization")
+			if strings.HasPrefix(auth, "Bearer ") {
+				key = strings.TrimPrefix(auth, "Bearer ")
+			}
+		}
+
+		// Constant-time comparison to prevent timing attacks
+		if subtle.ConstantTimeCompare([]byte(key), []byte(s.apiKey)) != 1 {
+			s.sendError(w, http.StatusUnauthorized, "Invalid or missing API key")
 			return
 		}
 
