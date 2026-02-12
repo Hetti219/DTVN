@@ -64,11 +64,11 @@ export class NetworkViz {
                             <span>Error / Stopped</span>
                         </div>
                         <div class="legend-item">
-                            <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#1D9BF0" stroke-width="2" stroke-opacity="0.5"/></svg>
+                            <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#1D9BF0" stroke-width="2" stroke-opacity="0.6"/></svg>
                             <span>Bootstrap Link</span>
                         </div>
                         <div class="legend-item">
-                            <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#71767B" stroke-width="1" stroke-opacity="0.4" stroke-dasharray="4 3"/></svg>
+                            <svg width="20" height="4"><line x1="0" y1="2" x2="20" y2="2" stroke="#71767B" stroke-width="1" stroke-opacity="0.7" stroke-dasharray="4 3"/></svg>
                             <span>DHT Mesh Link</span>
                         </div>
                     </div>
@@ -354,7 +354,7 @@ export class NetworkViz {
             .data(this.links)
             .enter().append('line')
             .attr('stroke', d => d.type === 'bootstrap' ? '#1D9BF0' : '#71767B')
-            .attr('stroke-opacity', d => d.type === 'bootstrap' ? 0.5 : 0.25)
+            .attr('stroke-opacity', d => d.type === 'bootstrap' ? 0.6 : 0.45)
             .attr('stroke-width', d => d.type === 'bootstrap' ? 2 : 1)
             .attr('stroke-dasharray', d => d.type === 'mesh' ? '4 3' : 'none');
 
