@@ -98,6 +98,11 @@ func main() {
 	}()
 
 	fmt.Printf("\nSupervisor running on http://%s:%d\n", *webAddr, *webPort)
+	if *webAddr == "0.0.0.0" && *apiKey == "" {
+		fmt.Println("\nWARNING: Supervisor is binding to all interfaces (0.0.0.0) without an API key.")
+		fmt.Println("         This exposes the API to the entire network without authentication.")
+		fmt.Println("         Set -api-key or DTVN_API_KEY to secure the API, or use -web-addr 127.0.0.1")
+	}
 	fmt.Println("\nOpen this URL in your browser to access the web interface.")
 	fmt.Println("Press Ctrl+C to stop the supervisor.")
 	fmt.Println()
