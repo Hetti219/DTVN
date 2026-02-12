@@ -82,7 +82,7 @@ func DeserializePrePrepare(data []byte) (*PrePrepareMsg, error) {
 		Operation: prePrepare.Request.Operation.String(),
 		Data:      prePrepare.Request.TicketData,
 		Timestamp: prePrepare.Request.Timestamp,
-		ClientSig: prePrepare.Request.ClientSignature,
+		NodeID:    string(prePrepare.Request.ClientSignature),
 	}
 
 	return &PrePrepareMsg{
@@ -169,7 +169,7 @@ func SerializeRequest(req *Request) ([]byte, error) {
 		Operation:       pb.TicketOperation(pb.TicketOperation_value[req.Operation]),
 		TicketData:      req.Data,
 		Timestamp:       req.Timestamp,
-		ClientSignature: req.ClientSig,
+		ClientSignature: []byte(req.NodeID),
 	}
 
 	data, err := proto.Marshal(reqProto)
@@ -193,6 +193,6 @@ func DeserializeRequest(data []byte) (*Request, error) {
 		Operation: reqProto.Operation.String(),
 		Data:      reqProto.TicketData,
 		Timestamp: reqProto.Timestamp,
-		ClientSig: reqProto.ClientSignature,
+		NodeID:    string(reqProto.ClientSignature),
 	}, nil
 }

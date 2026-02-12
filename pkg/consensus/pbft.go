@@ -113,7 +113,7 @@ type Request struct {
 	Operation string
 	Data      []byte
 	Timestamp int64
-	ClientSig []byte
+	NodeID    string // Originating node ID, carried through consensus via ClientSignature proto field
 }
 
 // Checkpoint represents a state checkpoint

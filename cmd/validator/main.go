@@ -543,15 +543,20 @@ func (n *ValidatorNode) setupHandlers() {
 
 	// Register consensus handler
 	n.pbftNode.RegisterHandler(func(req *consensus.Request) error {
-		// Handle consensus decision
+		// Use the originating node's ID from the request so all nodes
+		// store the same ValidatorID after consensus commits.
+		validatorID := req.NodeID
+		if validatorID == "" {
+			validatorID = n.nodeID // fallback for older requests without NodeID
+		}
 		var err error
 		switch req.Operation {
 		case "VALIDATE":
-			err = n.stateMachine.ValidateTicket(req.TicketID, n.nodeID, req.Data)
+			err = n.stateMachine.ValidateTicket(req.TicketID, validatorID, req.Data)
 		case "CONSUME":
-			err = n.stateMachine.ConsumeTicket(req.TicketID, n.nodeID)
+			err = n.stateMachine.ConsumeTicket(req.TicketID, validatorID)
 		case "DISPUTE":
-			err = n.stateMachine.DisputeTicket(req.TicketID, n.nodeID)
+			err = n.stateMachine.DisputeTicket(req.TicketID, validatorID)
 		}
 		if err != nil {
 			return err
@@ -895,6 +900,7 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 		Operation: "VALIDATE",
 		Data:      data,
 		Timestamp: time.Now().Unix(),
+		NodeID:    n.nodeID,
 	}
 
 	// If this node is the primary, propose and wait for consensus

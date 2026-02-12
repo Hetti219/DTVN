@@ -141,6 +141,57 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, endpoint s
 	io.Copy(w, resp.Body)
 }
 
+// proxyRequestToPrimary forwards a read request to the primary node for consistency.
+// Falls back to any running node if the primary is unavailable.
+func (s *Server) proxyRequestToPrimary(w http.ResponseWriter, r *http.Request, endpoint string) {
+	nodeURL, err := s.getPrimaryNodeURL()
+	if err != nil {
+		// Fallback to any running node rather than failing entirely
+		nodeURL, err = s.getRunningNodeURL()
+		if err != nil {
+			s.writeError(w, http.StatusServiceUnavailable, "No running nodes available. Start a cluster first.")
+			return
+		}
+	}
+
+	targetURL := fmt.Sprintf("%s/api/v1%s", nodeURL, endpoint)
+
+	var body io.Reader
+	if r.Body != nil {
+		bodyBytes, err := io.ReadAll(r.Body)
+		if err != nil {
+			s.writeError(w, http.StatusInternalServerError, "Failed to read request body")
+			return
+		}
+		body = bytes.NewReader(bodyBytes)
+	}
+
+	proxyReq, err := http.NewRequest(r.Method, targetURL, body)
+	if err != nil {
+		s.writeError(w, http.StatusInternalServerError, "Failed to create proxy request")
+		return
+	}
+
+	proxyReq.Header = r.Header.Clone()
+
+	client := &http.Client{}
+	resp, err := client.Do(proxyReq)
+	if err != nil {
+		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to connect to validator node: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	for key, values := range resp.Header {
+		for _, value := range values {
+			w.Header().Add(key, value)
+		}
+	}
+
+	w.WriteHeader(resp.StatusCode)
+	io.Copy(w, resp.Body)
+}
+
 // proxyTicketRequest proxies a ticket mutation request to the primary node
 // and broadcasts a WebSocket event on success
 func (s *Server) proxyTicketRequest(w http.ResponseWriter, r *http.Request, endpoint string, eventType string) {
@@ -368,7 +419,9 @@ func (s *Server) handleProxyValidateTicketViaNode(w http.ResponseWriter, r *http
 // Ticket proxy handlers
 
 func (s *Server) handleProxyGetAllTickets(w http.ResponseWriter, r *http.Request) {
-	s.proxyRequest(w, r, "/tickets")
+	// Read from primary for consistency — the primary always has the latest
+	// committed state, while secondaries may lag behind state replication.
+	s.proxyRequestToPrimary(w, r, "/tickets")
 }
 
 func (s *Server) handleProxyValidateTicket(w http.ResponseWriter, r *http.Request) {
@@ -386,7 +439,7 @@ func (s *Server) handleProxyDisputeTicket(w http.ResponseWriter, r *http.Request
 func (s *Server) handleProxyGetTicket(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	ticketID := vars["id"]
-	s.proxyRequest(w, r, fmt.Sprintf("/tickets/%s", ticketID))
+	s.proxyRequestToPrimary(w, r, fmt.Sprintf("/tickets/%s", ticketID))
 }
 
 // Stats/Peers/Config proxy handlers
