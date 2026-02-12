@@ -41,6 +41,9 @@ type ValidatorInterface interface {
 	GetStats() map[string]interface{}
 	GetPeers() ([]PeerInfo, error)
 	GetConfig() (interface{}, error)
+	GetConsensusLogs() ([]interface{}, error)
+	GetNodeCryptoInfo() map[string]interface{}
+	GetStorageEntries() map[string]interface{}
 }
 
 // Config holds API server configuration
@@ -126,6 +129,11 @@ func (s *Server) setupRoutes() {
 	// Peer and config information
 	api.HandleFunc("/peers", s.handleGetPeers).Methods("GET")
 	api.HandleFunc("/config", s.handleGetConfig).Methods("GET")
+
+	// Advanced inspection endpoints
+	api.HandleFunc("/consensus/logs", s.handleGetConsensusLogs).Methods("GET")
+	api.HandleFunc("/node/crypto", s.handleGetNodeCrypto).Methods("GET")
+	api.HandleFunc("/storage/entries", s.handleGetStorageEntries).Methods("GET")
 
 	// Health check
 	s.router.HandleFunc("/health", s.handleHealthCheck).Methods("GET")
@@ -297,6 +305,25 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
 	stats := s.validator.GetStats()
 	s.sendSuccess(w, "Stats retrieved successfully", stats)
+}
+
+func (s *Server) handleGetConsensusLogs(w http.ResponseWriter, r *http.Request) {
+	logs, err := s.validator.GetConsensusLogs()
+	if err != nil {
+		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to retrieve consensus logs: %v", err))
+		return
+	}
+	s.sendSuccess(w, "Consensus logs retrieved successfully", logs)
+}
+
+func (s *Server) handleGetNodeCrypto(w http.ResponseWriter, r *http.Request) {
+	info := s.validator.GetNodeCryptoInfo()
+	s.sendSuccess(w, "Node crypto info retrieved successfully", info)
+}
+
+func (s *Server) handleGetStorageEntries(w http.ResponseWriter, r *http.Request) {
+	entries := s.validator.GetStorageEntries()
+	s.sendSuccess(w, "Storage entries retrieved successfully", entries)
 }
 
 func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
