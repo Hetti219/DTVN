@@ -48,6 +48,13 @@ export class API {
         });
     }
 
+    async validateTicketViaNode(ticketID, nodeID) {
+        return this.request('/tickets/validate-via-node', {
+            method: 'POST',
+            body: JSON.stringify({ ticket_id: ticketID, node_id: nodeID }),
+        });
+    }
+
     async consumeTicket(ticketID) {
         return this.request('/tickets/consume', {
             method: 'POST',
