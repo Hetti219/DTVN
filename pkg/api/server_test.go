@@ -146,6 +146,25 @@ func (m *MockValidator) GetConfig() (interface{}, error) {
 	}, nil
 }
 
+func (m *MockValidator) GetConsensusLogs() ([]interface{}, error) {
+	return []interface{}{}, nil
+}
+
+func (m *MockValidator) GetNodeCryptoInfo() map[string]interface{} {
+	return map[string]interface{}{
+		"node_id":   "test-node",
+		"peer_id":   "test-peer-id",
+		"public_key": "abcdef1234567890",
+	}
+}
+
+func (m *MockValidator) GetStorageEntries() map[string]interface{} {
+	return map[string]interface{}{
+		"total_tickets": 0,
+		"db_stats":      map[string]interface{}{},
+	}
+}
+
 // Helper function to create a test server
 func createTestServer(t *testing.T) (*Server, *MockValidator) {
 	ctx := context.Background()
