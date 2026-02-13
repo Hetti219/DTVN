@@ -248,8 +248,8 @@ func (g *GossipEngine) performAntiEntropy() {
 	// Get message digests from cache
 	digests := g.cache.GetDigests()
 
-	// Exchange digests (simplified - in production use proper protocol)
-	// For now, just request missing messages from the peer
+	// Exchange digests
+	// request missing messages from the peer
 	ctx, cancel := context.WithTimeout(g.ctx, 10*time.Second)
 	defer cancel()
 
