@@ -85,20 +85,14 @@ func (r *MessageRouter) RouteMessage(data []byte, senderID peer.ID) error {
 		}
 		return r.pbftHandler(msg.Type, msg.Payload)
 
-	case pb.ValidatorMessage_VIEW_CHANGE:
-		// TODO: Implement view change handling
-		fmt.Printf("Received VIEW_CHANGE message from %s (not yet implemented)\n", senderID)
-		return nil
-
-	case pb.ValidatorMessage_CHECKPOINT:
-		// TODO: Implement checkpoint handling
-		fmt.Printf("Received CHECKPOINT message from %s (not yet implemented)\n", senderID)
-		return nil
-
-	case pb.ValidatorMessage_HEARTBEAT:
-		// TODO: Implement heartbeat handling
-		fmt.Printf("Received HEARTBEAT message from %s (not yet implemented)\n", senderID)
-		return nil
+	case pb.ValidatorMessage_VIEW_CHANGE,
+		pb.ValidatorMessage_CHECKPOINT,
+		pb.ValidatorMessage_HEARTBEAT:
+		// Route to PBFT handler for view change, checkpoint, and heartbeat processing
+		if r.pbftHandler == nil {
+			return fmt.Errorf("no PBFT handler registered")
+		}
+		return r.pbftHandler(msg.Type, msg.Payload)
 
 	case pb.ValidatorMessage_STATE_SYNC_REQUEST,
 		pb.ValidatorMessage_STATE_SYNC_RESPONSE:

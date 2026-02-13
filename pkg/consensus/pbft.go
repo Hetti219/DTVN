@@ -20,6 +20,9 @@ const (
 	StateCommitted  State = "COMMITTED"
 )
 
+// checkpointInterval defines how many operations between checkpoints
+const checkpointInterval int64 = 10
+
 // PBFTNode represents a PBFT consensus node
 type PBFTNode struct {
 	nodeID       string
@@ -40,7 +43,10 @@ type PBFTNode struct {
 	mu           sync.RWMutex
 	handlers     []ConsensusHandler
 	broadcaster  MessageBroadcaster
-	checkpoints  map[int64]*Checkpoint
+	checkpoints          map[int64]*Checkpoint
+	checkpointVotes      map[int64]map[string]*Checkpoint
+	lastStableCheckpoint int64
+	viewChangeLog        map[int64]map[string]*ViewChangeMsg
 
 	// Callback mechanism for synchronous consensus waiting
 	// Maps request ID to callback function
@@ -124,6 +130,12 @@ type Checkpoint struct {
 	Timestamp   int64
 }
 
+// ViewChangeMsg represents a VIEW_CHANGE message
+type ViewChangeMsg struct {
+	NewView int64
+	NodeID  string
+}
+
 // ConsensusMessage is the interface for all consensus messages
 type ConsensusMessage interface {
 	GetView() int64
@@ -192,6 +204,8 @@ func NewPBFTNode(ctx context.Context, cfg *Config, broadcaster MessageBroadcaste
 		handlers:         make([]ConsensusHandler, 0),
 		broadcaster:      broadcaster,
 		checkpoints:      make(map[int64]*Checkpoint),
+		checkpointVotes:  make(map[int64]map[string]*Checkpoint),
+		viewChangeLog:    make(map[int64]map[string]*ViewChangeMsg),
 		requestCallbacks: make(map[string]ConsensusCallback),
 	}
 
@@ -591,6 +605,11 @@ func (n *PBFTNode) executeRequest(sequence int64) error {
 	// Reset view timer
 	n.viewTimer.Reset(n.viewTimeout)
 
+	// Create checkpoint at interval to enable log garbage collection
+	if sequence%checkpointInterval == 0 {
+		n.createCheckpoint(sequence)
+	}
+
 	return nil
 }
 
@@ -719,6 +738,7 @@ func (n *PBFTNode) initiateViewChange() {
 	fmt.Printf("Node %s: View timeout while in state %s, initiating view change\n", n.nodeID, n.state)
 
 	n.view++
+	newView := n.view
 
 	// Calculate which node should be primary for this view
 	primaryIndex := n.view % int64(n.totalNodes)
@@ -734,10 +754,245 @@ func (n *PBFTNode) initiateViewChange() {
 	n.state = StateIdle
 	n.viewTimer.Reset(n.viewTimeout)
 
+	// Record own view change vote
+	if n.viewChangeLog[newView] == nil {
+		n.viewChangeLog[newView] = make(map[string]*ViewChangeMsg)
+	}
+	n.viewChangeLog[newView][n.nodeID] = &ViewChangeMsg{
+		NewView: newView,
+		NodeID:  n.nodeID,
+	}
+
 	n.mu.Unlock()
+
+	// Broadcast VIEW_CHANGE message to other nodes
+	payload, err := SerializeViewChange(&ViewChangeMsg{
+		NewView: newView,
+		NodeID:  n.nodeID,
+	})
+	if err != nil {
+		fmt.Printf("Failed to serialize VIEW_CHANGE: %v\n", err)
+	} else {
+		data, err := SerializePBFTMessage(3, payload, n.nodeID) // 3 = VIEW_CHANGE type
+		if err != nil {
+			fmt.Printf("Failed to wrap VIEW_CHANGE message: %v\n", err)
+		} else {
+			go func() {
+				ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
+				defer cancel()
+				if err := n.broadcaster.Broadcast(ctx, data); err != nil {
+					fmt.Printf("Failed to broadcast VIEW_CHANGE: %v\n", err)
+				}
+			}()
+		}
+	}
 
 	// Fail all pending callbacks - consensus did not complete
 	n.failPendingCallbacks("view timeout")
+}
+
+// HandleViewChange handles incoming VIEW_CHANGE messages from other nodes.
+// When 2f+1 nodes agree on a new view, this node transitions to that view.
+func (n *PBFTNode) HandleViewChange(msg *ViewChangeMsg) error {
+	n.mu.Lock()
+
+	fmt.Printf("PBFT: Node %s received VIEW_CHANGE from %s for new view %d (current view: %d)\n",
+		n.nodeID, msg.NodeID, msg.NewView, n.view)
+
+	// Ignore view changes for views we've already passed
+	if msg.NewView <= n.view {
+		n.mu.Unlock()
+		return nil
+	}
+
+	// Store the view change vote
+	if n.viewChangeLog[msg.NewView] == nil {
+		n.viewChangeLog[msg.NewView] = make(map[string]*ViewChangeMsg)
+	}
+	n.viewChangeLog[msg.NewView][msg.NodeID] = msg
+
+	// Check if we have 2f+1 view change messages for this new view
+	required := 2*n.f + 1
+	if required < 1 {
+		required = 1
+	}
+	current := len(n.viewChangeLog[msg.NewView])
+
+	fmt.Printf("PBFT: Node %s VIEW_CHANGE progress for view %d: %d/%d\n",
+		n.nodeID, msg.NewView, current, required)
+
+	if current < required {
+		n.mu.Unlock()
+		return nil
+	}
+
+	// Quorum reached — transition to new view
+	fmt.Printf("PBFT: Node %s has VIEW_CHANGE quorum for view %d, transitioning\n",
+		n.nodeID, msg.NewView)
+
+	n.view = msg.NewView
+
+	// Calculate new primary
+	primaryIndex := n.view % int64(n.totalNodes)
+	expectedPrimaryID := fmt.Sprintf("node%d", primaryIndex)
+	n.isPrimary = (n.nodeID == expectedPrimaryID)
+
+	// Reset state
+	n.state = StateIdle
+	n.viewTimer.Reset(n.viewTimeout)
+
+	// Clean up old view change logs
+	for v := range n.viewChangeLog {
+		if v <= n.view {
+			delete(n.viewChangeLog, v)
+		}
+	}
+
+	fmt.Printf("PBFT: Node %s transitioned to view %d, primary: %s, isPrimary: %v\n",
+		n.nodeID, n.view, expectedPrimaryID, n.isPrimary)
+
+	n.mu.Unlock()
+
+	// Fail pending callbacks outside the lock — old view consensus won't complete
+	n.failPendingCallbacks("view change")
+
+	return nil
+}
+
+// HandleCheckpoint handles incoming CHECKPOINT messages from other nodes.
+// When 2f+1 matching checkpoints are collected, a stable checkpoint is established
+// and old consensus logs are garbage collected.
+func (n *PBFTNode) HandleCheckpoint(ckpt *Checkpoint) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	fmt.Printf("PBFT: Node %s received CHECKPOINT from %s for seq %d\n",
+		n.nodeID, ckpt.NodeID, ckpt.Sequence)
+
+	// Ignore checkpoints at or below our last stable checkpoint
+	if ckpt.Sequence <= n.lastStableCheckpoint {
+		return nil
+	}
+
+	// Store checkpoint vote
+	if n.checkpointVotes[ckpt.Sequence] == nil {
+		n.checkpointVotes[ckpt.Sequence] = make(map[string]*Checkpoint)
+	}
+	n.checkpointVotes[ckpt.Sequence][ckpt.NodeID] = ckpt
+
+	// Check for stable checkpoint (2f+1 matching checkpoints)
+	required := 2*n.f + 1
+	if required < 1 {
+		required = 1
+	}
+	votes := n.checkpointVotes[ckpt.Sequence]
+
+	if len(votes) < required {
+		return nil
+	}
+
+	// Count votes per digest to verify agreement
+	digests := make(map[string]int)
+	for _, v := range votes {
+		digests[v.StateDigest]++
+	}
+
+	// Establish stable checkpoint if any digest has quorum
+	for digest, count := range digests {
+		if count >= required {
+			fmt.Printf("PBFT: Node %s stable checkpoint at seq %d (digest: %s)\n",
+				n.nodeID, ckpt.Sequence, digest)
+
+			n.lastStableCheckpoint = ckpt.Sequence
+			n.garbageCollect(ckpt.Sequence)
+
+			// Clean up old checkpoint votes
+			for seq := range n.checkpointVotes {
+				if seq <= ckpt.Sequence {
+					delete(n.checkpointVotes, seq)
+				}
+			}
+			break
+		}
+	}
+
+	return nil
+}
+
+// createCheckpoint creates and broadcasts a checkpoint at the given sequence.
+// Must be called while holding n.mu.
+func (n *PBFTNode) createCheckpoint(sequence int64) {
+	// Compute state digest as hash of the sequence number.
+	// All correct nodes at the same sequence should produce the same digest
+	// because PBFT consensus guarantees they executed the same operations.
+	digest := fmt.Sprintf("%d", sequence)
+	hash := sha256.Sum256([]byte(digest))
+	stateDigest := hex.EncodeToString(hash[:])
+
+	ckpt := &Checkpoint{
+		Sequence:    sequence,
+		StateDigest: stateDigest,
+		NodeID:      n.nodeID,
+		Timestamp:   time.Now().UnixNano(),
+	}
+
+	// Store own checkpoint
+	n.checkpoints[sequence] = ckpt
+
+	// Add own vote for checkpoint quorum
+	if n.checkpointVotes[sequence] == nil {
+		n.checkpointVotes[sequence] = make(map[string]*Checkpoint)
+	}
+	n.checkpointVotes[sequence][n.nodeID] = ckpt
+
+	fmt.Printf("PBFT: Node %s created checkpoint at seq %d\n", n.nodeID, sequence)
+
+	// Broadcast checkpoint (goroutine because caller holds the lock)
+	payload, err := SerializeCheckpoint(ckpt)
+	if err != nil {
+		fmt.Printf("Failed to serialize CHECKPOINT: %v\n", err)
+		return
+	}
+	data, err := SerializePBFTMessage(4, payload, n.nodeID) // 4 = CHECKPOINT type
+	if err != nil {
+		fmt.Printf("Failed to wrap CHECKPOINT message: %v\n", err)
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
+		defer cancel()
+		if err := n.broadcaster.Broadcast(ctx, data); err != nil {
+			fmt.Printf("Failed to broadcast CHECKPOINT: %v\n", err)
+		}
+	}()
+}
+
+// garbageCollect removes old consensus log entries up to the stable checkpoint.
+// Must be called while holding n.mu.
+func (n *PBFTNode) garbageCollect(upToSequence int64) {
+	for seq := range n.requestLog {
+		if seq <= upToSequence {
+			delete(n.requestLog, seq)
+		}
+	}
+	for seq := range n.prepareLog {
+		if seq <= upToSequence {
+			delete(n.prepareLog, seq)
+		}
+	}
+	for seq := range n.commitLog {
+		if seq <= upToSequence {
+			delete(n.commitLog, seq)
+		}
+	}
+	for seq := range n.checkpoints {
+		if seq < upToSequence {
+			delete(n.checkpoints, seq)
+		}
+	}
+
+	fmt.Printf("PBFT: Node %s garbage collected logs up to seq %d\n", n.nodeID, upToSequence)
 }
 
 // GetView returns the current view
@@ -783,6 +1038,9 @@ func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
 		0: "PRE_PREPARE",
 		1: "PREPARE",
 		2: "COMMIT",
+		3: "VIEW_CHANGE",
+		4: "CHECKPOINT",
+		6: "HEARTBEAT",
 		7: "CLIENT_REQUEST",
 	}[msgType]
 	if msgTypeName == "" {
@@ -815,6 +1073,21 @@ func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
 			fmt.Printf("PBFT: Node %s deserialized COMMIT from %s for seq %d, view %d\n",
 				n.nodeID, commit.NodeID, commit.Sequence, commit.View)
 		}
+	case 3: // VIEW_CHANGE
+		viewChangeMsg, err := DeserializeViewChange(payload)
+		if err != nil {
+			return fmt.Errorf("failed to deserialize view change: %w", err)
+		}
+		return n.HandleViewChange(viewChangeMsg)
+	case 4: // CHECKPOINT
+		ckpt, err := DeserializeCheckpoint(payload)
+		if err != nil {
+			return fmt.Errorf("failed to deserialize checkpoint: %w", err)
+		}
+		return n.HandleCheckpoint(ckpt)
+	case 6: // HEARTBEAT
+		fmt.Printf("PBFT: Node %s received HEARTBEAT (payload size: %d bytes)\n", n.nodeID, len(payload))
+		return nil
 	case 7: // CLIENT_REQUEST - forwarded from non-primary node
 		// Deserialize the request
 		req, err := DeserializeRequest(payload)

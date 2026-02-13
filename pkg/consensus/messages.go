@@ -196,3 +196,71 @@ func DeserializeRequest(data []byte) (*Request, error) {
 		NodeID:    string(reqProto.ClientSignature),
 	}, nil
 }
+
+// SerializeViewChange serializes a ViewChangeMsg to protobuf format
+func SerializeViewChange(msg *ViewChangeMsg) ([]byte, error) {
+	viewChange := &pb.ViewChange{
+		NewView: msg.NewView,
+		NodeId:  msg.NodeID,
+	}
+
+	data, err := proto.Marshal(viewChange)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal ViewChange: %w", err)
+	}
+
+	return data, nil
+}
+
+// DeserializeViewChange deserializes a ViewChangeMsg from protobuf format
+func DeserializeViewChange(data []byte) (*ViewChangeMsg, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("cannot deserialize ViewChange: empty payload")
+	}
+
+	viewChange := &pb.ViewChange{}
+	if err := proto.Unmarshal(data, viewChange); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal ViewChange: %w", err)
+	}
+
+	return &ViewChangeMsg{
+		NewView: viewChange.NewView,
+		NodeID:  viewChange.NodeId,
+	}, nil
+}
+
+// SerializeCheckpoint serializes a Checkpoint to protobuf format
+func SerializeCheckpoint(ckpt *Checkpoint) ([]byte, error) {
+	checkpoint := &pb.Checkpoint{
+		Sequence:    ckpt.Sequence,
+		StateDigest: []byte(ckpt.StateDigest),
+		NodeId:      ckpt.NodeID,
+		Timestamp:   ckpt.Timestamp,
+	}
+
+	data, err := proto.Marshal(checkpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal Checkpoint: %w", err)
+	}
+
+	return data, nil
+}
+
+// DeserializeCheckpoint deserializes a Checkpoint from protobuf format
+func DeserializeCheckpoint(data []byte) (*Checkpoint, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("cannot deserialize Checkpoint: empty payload")
+	}
+
+	checkpoint := &pb.Checkpoint{}
+	if err := proto.Unmarshal(data, checkpoint); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal Checkpoint: %w", err)
+	}
+
+	return &Checkpoint{
+		Sequence:    checkpoint.Sequence,
+		StateDigest: string(checkpoint.StateDigest),
+		NodeID:      checkpoint.NodeId,
+		Timestamp:   checkpoint.Timestamp,
+	}, nil
+}
