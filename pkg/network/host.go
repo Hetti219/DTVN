@@ -341,7 +341,6 @@ func (p *P2PHost) handleStream(stream network.Stream) {
 
 	peerID := stream.Conn().RemotePeer()
 
-	// Note: stream.Read() may return fewer bytes than requested, causing
 	// corrupted message length parsing and subsequent message routing failures
 	lenBuf := make([]byte, 4)
 	if _, err := io.ReadFull(stream, lenBuf); err != nil {
