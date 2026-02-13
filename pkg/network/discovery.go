@@ -90,8 +90,6 @@ func (d *Discovery) Start() error {
 	go d.discoverPeers()
 
 	// Run again after short delays to catch newly started nodes.
-	// Multiple passes with increasing delays ensure we discover peers
-	// that start up slightly after us.
 	time.AfterFunc(3*time.Second, func() {
 		fmt.Printf("Discovery: Running second discovery pass...\n")
 		d.discoverPeers()
