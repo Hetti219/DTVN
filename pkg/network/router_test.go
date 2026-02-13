@@ -364,12 +364,76 @@ func TestRouteMessageErrors(t *testing.T) {
 	})
 }
 
-// TestUnimplementedMessageTypes tests messages not yet implemented
-func TestUnimplementedMessageTypes(t *testing.T) {
+// TestViewChangeCheckpointHeartbeatRouting tests that VIEW_CHANGE, CHECKPOINT,
+// and HEARTBEAT messages are routed to the PBFT handler
+func TestViewChangeCheckpointHeartbeatRouting(t *testing.T) {
 	_, pub, _ := crypto.GenerateKeyPair(crypto.Ed25519, 2048)
 	senderID, _ := peer.IDFromPublicKey(pub)
 
 	t.Run("ViewChangeMessage", func(t *testing.T) {
+		router := NewMessageRouter()
+
+		receivedType := pb.ValidatorMessage_Type(-1)
+
+		router.RegisterPBFTHandler(func(msgType pb.ValidatorMessage_Type, payload []byte) error {
+			receivedType = msgType
+			return nil
+		})
+
+		msg := &pb.ValidatorMessage{
+			Type:    pb.ValidatorMessage_VIEW_CHANGE,
+			Payload: []byte("view-change"),
+		}
+		data, _ := proto.Marshal(msg)
+
+		err := router.RouteMessage(data, senderID)
+		require.NoError(t, err)
+		assert.Equal(t, pb.ValidatorMessage_VIEW_CHANGE, receivedType)
+	})
+
+	t.Run("CheckpointMessage", func(t *testing.T) {
+		router := NewMessageRouter()
+
+		receivedType := pb.ValidatorMessage_Type(-1)
+
+		router.RegisterPBFTHandler(func(msgType pb.ValidatorMessage_Type, payload []byte) error {
+			receivedType = msgType
+			return nil
+		})
+
+		msg := &pb.ValidatorMessage{
+			Type:    pb.ValidatorMessage_CHECKPOINT,
+			Payload: []byte("checkpoint"),
+		}
+		data, _ := proto.Marshal(msg)
+
+		err := router.RouteMessage(data, senderID)
+		require.NoError(t, err)
+		assert.Equal(t, pb.ValidatorMessage_CHECKPOINT, receivedType)
+	})
+
+	t.Run("HeartbeatMessage", func(t *testing.T) {
+		router := NewMessageRouter()
+
+		receivedType := pb.ValidatorMessage_Type(-1)
+
+		router.RegisterPBFTHandler(func(msgType pb.ValidatorMessage_Type, payload []byte) error {
+			receivedType = msgType
+			return nil
+		})
+
+		msg := &pb.ValidatorMessage{
+			Type:    pb.ValidatorMessage_HEARTBEAT,
+			Payload: []byte("heartbeat"),
+		}
+		data, _ := proto.Marshal(msg)
+
+		err := router.RouteMessage(data, senderID)
+		require.NoError(t, err)
+		assert.Equal(t, pb.ValidatorMessage_HEARTBEAT, receivedType)
+	})
+
+	t.Run("NoPBFTHandlerRegistered", func(t *testing.T) {
 		router := NewMessageRouter()
 
 		msg := &pb.ValidatorMessage{
@@ -378,37 +442,9 @@ func TestUnimplementedMessageTypes(t *testing.T) {
 		}
 		data, _ := proto.Marshal(msg)
 
-		// Should not error (just logs for now)
 		err := router.RouteMessage(data, senderID)
-		assert.NoError(t, err)
-	})
-
-	t.Run("CheckpointMessage", func(t *testing.T) {
-		router := NewMessageRouter()
-
-		msg := &pb.ValidatorMessage{
-			Type:    pb.ValidatorMessage_CHECKPOINT,
-			Payload: []byte("checkpoint"),
-		}
-		data, _ := proto.Marshal(msg)
-
-		// Should not error (just logs for now)
-		err := router.RouteMessage(data, senderID)
-		assert.NoError(t, err)
-	})
-
-	t.Run("HeartbeatMessage", func(t *testing.T) {
-		router := NewMessageRouter()
-
-		msg := &pb.ValidatorMessage{
-			Type:    pb.ValidatorMessage_HEARTBEAT,
-			Payload: []byte("heartbeat"),
-		}
-		data, _ := proto.Marshal(msg)
-
-		// Should not error (just logs for now)
-		err := router.RouteMessage(data, senderID)
-		assert.NoError(t, err)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "no PBFT handler registered")
 	})
 }
 
