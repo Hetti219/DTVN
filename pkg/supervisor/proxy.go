@@ -58,6 +58,22 @@ func (s *Server) getRunningNodeURL() (string, error) {
 func (s *Server) getPrimaryNodeURL() (string, error) {
 	nodes := s.nodeManager.GetAllNodes()
 
+	// Phase 1: Dynamic discovery — query running nodes to find who is
+	// actually the PBFT primary. This reflects view changes at the consensus
+	// layer (e.g., after the original primary went down and a new one was elected).
+	for _, node := range nodes {
+		if node.Status != NodeStatusRunning {
+			continue
+		}
+		url := fmt.Sprintf("http://127.0.0.1:%d", node.APIPort)
+		if isPrimary, err := s.checkNodeIsPrimary(url); err == nil && isPrimary {
+			return url, nil
+		}
+	}
+
+	// Phase 2: Fall back to static IsPrimary flag from cluster startup.
+	// This handles the case where nodes haven't fully started their API servers
+	// yet but were configured as primary during cluster creation.
 	hasPrimary := false
 	for _, node := range nodes {
 		if node.IsPrimary {
@@ -88,6 +104,40 @@ func (s *Server) isNodeReachable(baseURL string) bool {
 	}
 	resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
+}
+
+// checkNodeIsPrimary queries a node's stats endpoint to determine if it
+// considers itself the PBFT primary. This reflects live consensus state
+// including view changes that happen after cluster startup.
+func (s *Server) checkNodeIsPrimary(baseURL string) (bool, error) {
+	client := &http.Client{Timeout: 1 * time.Second}
+	req, err := http.NewRequest("GET", baseURL+"/api/v1/stats", nil)
+	if err != nil {
+		return false, err
+	}
+	if s.apiKey != "" {
+		req.Header.Set("X-API-Key", s.apiKey)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("stats returned %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Data struct {
+			IsPrimary bool `json:"is_primary"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, err
+	}
+
+	return result.Data.IsPrimary, nil
 }
 
 // proxyRequest forwards a request to a running validator node
