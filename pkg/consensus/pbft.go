@@ -25,24 +25,24 @@ const checkpointInterval int64 = 10
 
 // PBFTNode represents a PBFT consensus node
 type PBFTNode struct {
-	nodeID       string
-	view         int64
-	sequence     int64
-	state        State
-	f            int // Maximum number of Byzantine nodes tolerated
-	totalNodes   int
-	isPrimary    bool
-	prepareLog   map[int64]map[string]*PrepareMsg
-	commitLog    map[int64]map[string]*CommitMsg
-	requestLog   map[int64]*Request
-	messageQueue chan ConsensusMessage
-	viewTimer    *time.Timer
-	viewTimeout  time.Duration // Configurable view timeout for consensus
-	ctx          context.Context
-	cancel       context.CancelFunc
-	mu           sync.RWMutex
-	handlers     []ConsensusHandler
-	broadcaster  MessageBroadcaster
+	nodeID               string
+	view                 int64
+	sequence             int64
+	state                State
+	f                    int // Maximum number of Byzantine nodes tolerated
+	totalNodes           int
+	isPrimary            bool
+	prepareLog           map[int64]map[string]*PrepareMsg
+	commitLog            map[int64]map[string]*CommitMsg
+	requestLog           map[int64]*Request
+	messageQueue         chan ConsensusMessage
+	viewTimer            *time.Timer
+	viewTimeout          time.Duration // Configurable view timeout for consensus
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	mu                   sync.RWMutex
+	handlers             []ConsensusHandler
+	broadcaster          MessageBroadcaster
 	checkpoints          map[int64]*Checkpoint
 	checkpointVotes      map[int64]map[string]*Checkpoint
 	lastStableCheckpoint int64
@@ -184,9 +184,7 @@ func NewPBFTNode(ctx context.Context, cfg *Config, broadcaster MessageBroadcaste
 
 	viewTimeout := cfg.ViewTimeout
 	if viewTimeout == 0 {
-		// Default to 15 seconds to allow sufficient time for PBFT three-phase commit
-		// across network latency. 5 seconds was too aggressive and caused premature
-		// view changes before PREPARE votes could be collected.
+		// Default to 15 seconds to allow sufficient time for PBFT three-phase commit across network latency.
 		viewTimeout = 15 * time.Second
 	}
 
@@ -330,13 +328,10 @@ func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 	}
 
 	// Store request - this makes the request available for consensus execution.
-	// PREPAREs or COMMITs may have arrived before this PRE-PREPARE due to
-	// network reordering; they are stored but not acted upon until now.
+
 	n.requestLog[msg.Sequence] = msg.Request
 
-	// Reset view timer for this new consensus round. Without this, a node
-	// that has been idle may have a nearly-expired timer, causing a premature
-	// view change before consensus can complete.
+	// Reset view timer for this new consensus round.
 	n.viewTimer.Reset(n.viewTimeout)
 
 	// Update state
@@ -385,9 +380,7 @@ func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 		return n.moveToCommitPhase(msg.Sequence, msg.Digest)
 	}
 
-	// Also check if COMMITs arrived early (before PRE-PREPARE) and we already
-	// have commit quorum. This handles extreme reordering where the entire
-	// PREPARE+COMMIT exchange completed before PRE-PREPARE was processed.
+	// Also check if COMMITs arrived early (before PRE-PREPARE) and we already have commit quorum.
 	if n.checkCommitQuorum(msg.Sequence) {
 		return n.executeRequest(msg.Sequence)
 	}
@@ -466,9 +459,6 @@ func (n *PBFTNode) HandleCommit(msg *CommitMsg) error {
 	// Check if we have quorum (2f+1 COMMIT messages)
 	if n.checkCommitQuorum(msg.Sequence) {
 		// Only execute if PRE-PREPARE has been processed (request exists).
-		// If COMMITs arrive before PRE-PREPARE due to network reordering,
-		// we store them and executeRequest will be called from
-		// handlePrePrepare → moveToCommitPhase once the request is available.
 		if _, hasRequest := n.requestLog[msg.Sequence]; hasRequest {
 			return n.executeRequest(msg.Sequence)
 		}
@@ -589,12 +579,9 @@ func (n *PBFTNode) executeRequest(sequence int64) error {
 	fmt.Printf("PBFT: ✅ Request executed successfully for ticket %s\n", req.TicketID)
 
 	// Call state replicator to ensure reliable state propagation to all peers
-	// This provides guaranteed delivery beyond probabilistic gossip by directly
-	// broadcasting state updates to all connected peers after consensus commits.
 	if n.stateReplicator != nil {
 		if err := n.stateReplicator(req); err != nil {
-			// Log the error but don't fail - state was applied locally and gossip
-			// will eventually propagate it via anti-entropy
+			// Log the error but don't fail - state was applied locally and gossip will eventually propagate it via anti-entropy
 			fmt.Printf("PBFT: Warning - State replication failed (will retry via anti-entropy): %v\n", err)
 		} else {
 			fmt.Printf("PBFT: ✅ State replicated to all peers for ticket %s\n", req.TicketID)
@@ -626,28 +613,18 @@ func (n *PBFTNode) RegisterHandler(handler ConsensusHandler) {
 	n.handlers = append(n.handlers, handler)
 }
 
-// RegisterCallback registers a callback for a specific request that will be called
-// when consensus completes (success or failure). This enables synchronous API responses.
+// RegisterCallback registers a callback for a specific request that will be called when consensus completes (success or failure).
 func (n *PBFTNode) RegisterCallback(requestID string, callback ConsensusCallback) {
 	n.callbackMu.Lock()
 	defer n.callbackMu.Unlock()
 	n.requestCallbacks[requestID] = callback
 }
 
-// RegisterStateReplicator registers a callback that is invoked after consensus commits
-// to ensure reliable state propagation to all peers. This provides guaranteed delivery
-// beyond probabilistic gossip by directly broadcasting state updates to all connected peers.
+// RegisterStateReplicator registers a callback that is invoked after consensus commits to ensure reliable state propagation to all peers.
 func (n *PBFTNode) RegisterStateReplicator(replicator StateReplicator) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.stateReplicator = replicator
-}
-
-// unregisterCallback removes a callback for a request
-func (n *PBFTNode) unregisterCallback(requestID string) {
-	n.callbackMu.Lock()
-	defer n.callbackMu.Unlock()
-	delete(n.requestCallbacks, requestID)
 }
 
 // invokeCallback calls and removes the callback for a request
@@ -734,7 +711,6 @@ func (n *PBFTNode) initiateViewChange() {
 
 	// Only trigger view change if there's a pending consensus operation
 	// or a pending client request waiting for the primary to act.
-	// If truly idle (no pending work), just reset the timer and continue.
 	if n.state == StateIdle && !n.hasPendingClientRequest {
 		n.viewTimer.Reset(n.viewTimeout)
 		n.mu.Unlock()
@@ -871,8 +847,6 @@ func (n *PBFTNode) HandleViewChange(msg *ViewChangeMsg) error {
 }
 
 // HandleCheckpoint handles incoming CHECKPOINT messages from other nodes.
-// When 2f+1 matching checkpoints are collected, a stable checkpoint is established
-// and old consensus logs are garbage collected.
 func (n *PBFTNode) HandleCheckpoint(ckpt *Checkpoint) error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -931,11 +905,8 @@ func (n *PBFTNode) HandleCheckpoint(ckpt *Checkpoint) error {
 }
 
 // createCheckpoint creates and broadcasts a checkpoint at the given sequence.
-// Must be called while holding n.mu.
 func (n *PBFTNode) createCheckpoint(sequence int64) {
 	// Compute state digest as hash of the sequence number.
-	// All correct nodes at the same sequence should produce the same digest
-	// because PBFT consensus guarantees they executed the same operations.
 	digest := fmt.Sprintf("%d", sequence)
 	hash := sha256.Sum256([]byte(digest))
 	stateDigest := hex.EncodeToString(hash[:])
@@ -980,7 +951,6 @@ func (n *PBFTNode) createCheckpoint(sequence int64) {
 }
 
 // garbageCollect removes old consensus log entries up to the stable checkpoint.
-// Must be called while holding n.mu.
 func (n *PBFTNode) garbageCollect(upToSequence int64) {
 	for seq := range n.requestLog {
 		if seq <= upToSequence {
@@ -1040,8 +1010,7 @@ func (n *PBFTNode) GetPrimary() string {
 }
 
 // NotifyPendingRequest marks that a client request has been forwarded to the
-// primary but no consensus has started. This enables the view timer to trigger
-// a view change even from IDLE state, handling dead primary detection.
+// primary but no consensus has started.
 func (n *PBFTNode) NotifyPendingRequest() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -1049,8 +1018,7 @@ func (n *PBFTNode) NotifyPendingRequest() {
 	n.viewTimer.Reset(n.viewTimeout)
 }
 
-// ClearPendingRequest clears the pending client request flag, called when
-// the request completes successfully or after a view change.
+// ClearPendingRequest clears the pending client request flag, called when the request completes successfully or after a view change.
 func (n *PBFTNode) ClearPendingRequest() {
 	n.mu.Lock()
 	defer n.mu.Unlock()
@@ -1172,6 +1140,3 @@ func (n *PBFTNode) computeDigest(req *Request) string {
 	hash := sha256.Sum256([]byte(data))
 	return hex.EncodeToString(hash[:])
 }
-
-// Old string serialization functions removed - now using protobuf
-// See messages.go for the new SerializePrePrepare/Prepare/Commit functions
