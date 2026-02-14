@@ -61,16 +61,12 @@ type Config struct {
 
 // GenerateDeterministicKey generates a deterministic Ed25519 private key from a node ID.
 // This ensures that the same node ID always produces the same peer ID.
-//
-// The key seed can be configured via the DTVN_KEY_SEED environment variable.
-// When set, it replaces the default salt making keys deployment-specific and unpredictable.
-// When unset, the default hardcoded salt is used for development/testing compatibility.
+
 func GenerateDeterministicKey(nodeID string) (crypto.PrivKey, error) {
-	// Use a configurable seed so production deployments can set a secret value.
-	// The default is only suitable for development/testing.
+
 	salt := os.Getenv("DTVN_KEY_SEED")
 	if salt == "" {
-		salt = "dtvn-validator-key-v1"
+		salt = "dtvn-validator-key-v1" //only for testing
 	}
 	seed := sha256.Sum256([]byte(salt + nodeID))
 
@@ -345,8 +341,6 @@ func (p *P2PHost) handleStream(stream network.Stream) {
 
 	peerID := stream.Conn().RemotePeer()
 
-	// Read message length - use io.ReadFull to ensure we read all 4 bytes
-	// Note: stream.Read() may return fewer bytes than requested, causing
 	// corrupted message length parsing and subsequent message routing failures
 	lenBuf := make([]byte, 4)
 	if _, err := io.ReadFull(stream, lenBuf); err != nil {
@@ -363,7 +357,6 @@ func (p *P2PHost) handleStream(stream network.Stream) {
 		return
 	}
 
-	// Read message data - use io.ReadFull to ensure we read the complete message
 	// This is critical: partial reads cause message deserialization failures
 	// which break PBFT consensus (PREPARE messages never reach the handler)
 	data := make([]byte, msgLen)
