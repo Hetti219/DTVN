@@ -432,6 +432,27 @@ func (m *NodeManager) GetAllNodes() []*ManagedNode {
 	return nodes
 }
 
+// UpdatePrimaryStatus updates a node's primary flag and returns true if it changed.
+func (m *NodeManager) UpdatePrimaryStatus(nodeID string, isPrimary bool) bool {
+	m.mu.RLock()
+	node, ok := m.nodes[nodeID]
+	m.mu.RUnlock()
+
+	if !ok {
+		return false
+	}
+
+	node.mu.Lock()
+	defer node.mu.Unlock()
+
+	if node.IsPrimary == isPrimary {
+		return false
+	}
+
+	node.IsPrimary = isPrimary
+	return true
+}
+
 // GetNodeLogs returns the output buffer for a node
 func (m *NodeManager) GetNodeLogs(nodeID string) ([]string, error) {
 	m.mu.RLock()
