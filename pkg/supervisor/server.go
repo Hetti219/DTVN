@@ -30,6 +30,7 @@ type Server struct {
 	wsUpgrader     websocket.Upgrader
 	staticDir      string
 	apiKey         string
+	stopCh         chan struct{} // signals background goroutines to stop
 }
 
 // ServerConfig holds server configuration
@@ -60,6 +61,7 @@ func NewServer(cfg *ServerConfig) *Server {
 		wsClients: make(map[*websocket.Conn]bool),
 		staticDir: cfg.StaticDir,
 		apiKey:    cfg.APIKey,
+		stopCh:    make(chan struct{}),
 		wsUpgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -239,12 +241,18 @@ func (s *Server) Start() error {
 		WriteTimeout: 60 * time.Second,
 	}
 
+	// Start background monitor that detects PBFT primary changes via view change
+	go s.monitorPrimaryStatus()
+
 	fmt.Printf("Supervisor server starting on http://%s\n", s.addr)
 	return s.server.ListenAndServe()
 }
 
 // Stop stops the HTTP server
 func (s *Server) Stop(ctx context.Context) error {
+	// Stop background goroutines
+	close(s.stopCh)
+
 	// Stop all managed nodes
 	s.nodeManager.StopAllNodes()
 
@@ -265,6 +273,56 @@ func (s *Server) Stop(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
+// monitorPrimaryStatus periodically polls running validator nodes to detect
+// PBFT primary changes (e.g., after a view change when the old primary went down).
+// When a change is detected, it updates the manager and broadcasts a WebSocket event
+// so the dashboard and network graph reflect the new primary in real time.
+func (s *Server) monitorPrimaryStatus() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			s.refreshPrimaryStatus()
+		}
+	}
+}
+
+// refreshPrimaryStatus queries each running node's stats endpoint and updates
+// the supervisor's primary tracking if the consensus layer has changed the primary.
+func (s *Server) refreshPrimaryStatus() {
+	nodes := s.nodeManager.GetAllNodes()
+
+	for _, node := range nodes {
+		if node.Status != NodeStatusRunning {
+			continue
+		}
+
+		url := fmt.Sprintf("http://127.0.0.1:%d", node.APIPort)
+		isPrimary, err := s.checkNodeIsPrimary(url)
+		if err != nil {
+			continue
+		}
+
+		if s.nodeManager.UpdatePrimaryStatus(node.ID, isPrimary) {
+			// Primary status changed — broadcast to all connected dashboards
+			updatedNode, err := s.nodeManager.GetNode(node.ID)
+			if err != nil {
+				continue
+			}
+			s.broadcastWSMessage(map[string]interface{}{
+				"type":    "node_status",
+				"node_id": node.ID,
+				"status":  updatedNode.Status,
+				"node":    updatedNode,
+			})
+		}
+	}
+}
+
 // API Handlers
 
 func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
@@ -282,6 +340,9 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetNodes(w http.ResponseWriter, r *http.Request) {
+	// Refresh primary status from live consensus state before responding,
+	// so the frontend sees correct primary/replica roles after view changes.
+	s.refreshPrimaryStatus()
 	nodes := s.nodeManager.GetAllNodes()
 	s.writeJSON(w, nodes)
 }
