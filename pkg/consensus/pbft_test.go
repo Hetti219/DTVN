@@ -776,6 +776,161 @@ func TestViewChange(t *testing.T) {
 		// Primary should rotate to node1
 		assert.Equal(t, "node1", node.GetPrimary())
 	})
+
+	t.Run("ViewChangeFromIdleWithPendingRequest", func(t *testing.T) {
+		ctx := context.Background()
+		broadcaster := NewMockBroadcaster(2)
+
+		cfg := &Config{
+			NodeID:      "node1",
+			TotalNodes:  3,
+			IsPrimary:   false,
+			ViewTimeout: 100 * time.Millisecond,
+		}
+
+		node, err := NewPBFTNode(ctx, cfg, broadcaster)
+		require.NoError(t, err)
+		defer node.Close()
+
+		// Node is idle but has a pending client request (primary might be dead)
+		node.NotifyPendingRequest()
+
+		initialView := node.GetView()
+
+		// Trigger view change — should proceed because hasPendingClientRequest is true
+		node.initiateViewChange()
+
+		// View SHOULD change
+		assert.Equal(t, initialView+1, node.GetView())
+
+		// Flag should be cleared after view change
+		node.mu.RLock()
+		hasPending := node.hasPendingClientRequest
+		node.mu.RUnlock()
+		assert.False(t, hasPending)
+	})
+
+	t.Run("ViewChangeIdleNoPendingRequest", func(t *testing.T) {
+		ctx := context.Background()
+		broadcaster := NewMockBroadcaster(2)
+
+		cfg := &Config{
+			NodeID:      "node0",
+			TotalNodes:  3,
+			IsPrimary:   true,
+			ViewTimeout: 100 * time.Millisecond,
+		}
+
+		node, err := NewPBFTNode(ctx, cfg, broadcaster)
+		require.NoError(t, err)
+		defer node.Close()
+
+		initialView := node.GetView()
+
+		// No pending request, idle state — should NOT change view (regression test)
+		node.initiateViewChange()
+
+		assert.Equal(t, initialView, node.GetView())
+	})
+
+	t.Run("NotifyAndClearPendingRequest", func(t *testing.T) {
+		ctx := context.Background()
+		broadcaster := NewMockBroadcaster(2)
+
+		cfg := &Config{
+			NodeID:     "node1",
+			TotalNodes: 3,
+			IsPrimary:  false,
+		}
+
+		node, err := NewPBFTNode(ctx, cfg, broadcaster)
+		require.NoError(t, err)
+		defer node.Close()
+
+		// Initially no pending request
+		node.mu.RLock()
+		assert.False(t, node.hasPendingClientRequest)
+		node.mu.RUnlock()
+
+		// Notify
+		node.NotifyPendingRequest()
+		node.mu.RLock()
+		assert.True(t, node.hasPendingClientRequest)
+		node.mu.RUnlock()
+
+		// Clear
+		node.ClearPendingRequest()
+		node.mu.RLock()
+		assert.False(t, node.hasPendingClientRequest)
+		node.mu.RUnlock()
+	})
+
+	t.Run("ClientRequestOnNonPrimaryTracksForViewChange", func(t *testing.T) {
+		ctx := context.Background()
+		broadcaster := NewMockBroadcaster(2)
+
+		cfg := &Config{
+			NodeID:     "node1",
+			TotalNodes: 3,
+			IsPrimary:  false,
+		}
+
+		node, err := NewPBFTNode(ctx, cfg, broadcaster)
+		require.NoError(t, err)
+		defer node.Close()
+		node.Start()
+
+		// Simulate receiving a CLIENT_REQUEST as non-primary
+		req := &Request{
+			RequestID: "req-001",
+			TicketID:  "ticket-001",
+			Operation: "VALIDATE",
+			Timestamp: time.Now().Unix(),
+			NodeID:    "node2",
+		}
+
+		payload, err := SerializeRequest(req)
+		require.NoError(t, err)
+
+		err = node.HandleNetworkMessage(7, payload) // 7 = CLIENT_REQUEST
+		require.NoError(t, err)                     // Should NOT error (was error before fix)
+
+		// Should have set pending request flag
+		node.mu.RLock()
+		hasPending := node.hasPendingClientRequest
+		node.mu.RUnlock()
+		assert.True(t, hasPending)
+	})
+
+	t.Run("ViewChangeTimerTriggersWithPendingRequest", func(t *testing.T) {
+		ctx := context.Background()
+		broadcaster := NewMockBroadcaster(2)
+
+		cfg := &Config{
+			NodeID:      "node1",
+			TotalNodes:  4,
+			IsPrimary:   false,
+			ViewTimeout: 500 * time.Millisecond,
+		}
+
+		node, err := NewPBFTNode(ctx, cfg, broadcaster)
+		require.NoError(t, err)
+		defer node.Close()
+
+		node.Start()
+
+		// Mark pending request
+		node.NotifyPendingRequest()
+
+		initialView := node.GetView()
+
+		// Wait for view timer to fire (500ms + margin)
+		time.Sleep(800 * time.Millisecond)
+
+		// View should have changed
+		newView := node.GetView()
+		assert.Greater(t, newView, initialView)
+	})
 }
 
 // TestGetters tests getter methods

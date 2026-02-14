@@ -48,6 +48,11 @@ type PBFTNode struct {
 	lastStableCheckpoint int64
 	viewChangeLog        map[int64]map[string]*ViewChangeMsg
 
+	// Tracks whether this non-primary node has a pending client request
+	// that the primary hasn't started consensus for. Enables view change
+	// from IDLE state when the primary appears to be dead.
+	hasPendingClientRequest bool
+
 	// Callback mechanism for synchronous consensus waiting
 	// Maps request ID to callback function
 	requestCallbacks map[string]ConsensusCallback
@@ -601,6 +606,7 @@ func (n *PBFTNode) executeRequest(sequence int64) error {
 
 	// Reset to idle
 	n.state = StateIdle
+	n.hasPendingClientRequest = false
 
 	// Reset view timer
 	n.viewTimer.Reset(n.viewTimeout)
@@ -727,12 +733,16 @@ func (n *PBFTNode) initiateViewChange() {
 	n.mu.Lock()
 
 	// Only trigger view change if there's a pending consensus operation
-	// If the node is idle, just reset the timer and continue
-	if n.state == StateIdle {
+	// or a pending client request waiting for the primary to act.
+	// If truly idle (no pending work), just reset the timer and continue.
+	if n.state == StateIdle && !n.hasPendingClientRequest {
 		n.viewTimer.Reset(n.viewTimeout)
 		n.mu.Unlock()
 		return
 	}
+
+	// Clear the pending request flag - we are handling it via view change
+	n.hasPendingClientRequest = false
 
 	// There's a pending request that hasn't completed - trigger view change
 	fmt.Printf("Node %s: View timeout while in state %s, initiating view change\n", n.nodeID, n.state)
@@ -839,6 +849,7 @@ func (n *PBFTNode) HandleViewChange(msg *ViewChangeMsg) error {
 
 	// Reset state
 	n.state = StateIdle
+	n.hasPendingClientRequest = false
 	n.viewTimer.Reset(n.viewTimeout)
 
 	// Clean up old view change logs
@@ -1028,6 +1039,24 @@ func (n *PBFTNode) GetPrimary() string {
 	return fmt.Sprintf("node%d", primaryIndex)
 }
 
+// NotifyPendingRequest marks that a client request has been forwarded to the
+// primary but no consensus has started. This enables the view timer to trigger
+// a view change even from IDLE state, handling dead primary detection.
+func (n *PBFTNode) NotifyPendingRequest() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.hasPendingClientRequest = true
+	n.viewTimer.Reset(n.viewTimeout)
+}
+
+// ClearPendingRequest clears the pending client request flag, called when
+// the request completes successfully or after a view change.
+func (n *PBFTNode) ClearPendingRequest() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.hasPendingClientRequest = false
+}
+
 // HandleNetworkMessage processes incoming PBFT messages from the network layer
 func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
 	var msg ConsensusMessage
@@ -1089,15 +1118,18 @@ func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
 		fmt.Printf("PBFT: Node %s received HEARTBEAT (payload size: %d bytes)\n", n.nodeID, len(payload))
 		return nil
 	case 7: // CLIENT_REQUEST - forwarded from non-primary node
-		// Deserialize the request
 		req, err := DeserializeRequest(payload)
 		if err != nil {
 			return fmt.Errorf("failed to deserialize client request: %w", err)
 		}
 
-		// Only primary should receive and process forwarded client requests
 		if !n.IsPrimary() {
-			return fmt.Errorf("received client request but not primary")
+			// Non-primary: track the request so the view timer can trigger a
+			// view change if the primary never starts consensus (dead primary).
+			fmt.Printf("PBFT: Non-primary %s received CLIENT_REQUEST for ticket %s, tracking for view change\n",
+				n.nodeID, req.TicketID)
+			n.NotifyPendingRequest()
+			return nil
 		}
 
 		fmt.Printf("PBFT: Primary %s received forwarded client request for ticket %s\n", n.nodeID, req.TicketID)

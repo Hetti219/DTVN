@@ -1018,13 +1018,19 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 
 	fmt.Printf("Node %s: 📤 Successfully forwarded request for ticket %s to %d peers, waiting for consensus...\n", n.nodeID, ticketID, peerCount)
 
+	// Arm the PBFT view change timer for dead primary detection.
+	// If the primary doesn't start consensus within the view timeout,
+	// a view change will be triggered to elect a new primary.
+	n.pbftNode.NotifyPendingRequest()
+
 	// Wait for consensus to replicate the ticket to this node.
 	// The primary will process the forwarded request, run PBFT consensus,
 	// and the StateReplicator will broadcast the committed state to all peers
 	// (including this node). Poll local state until the ticket appears.
 	// If the primary rejects due to insufficient peers or the broadcast is lost,
 	// retry the broadcast every 5 seconds.
-	consensusTimeout := 20 * time.Second
+	// Timeout is 40s to accommodate potential view change (15s) + new consensus.
+	consensusTimeout := 40 * time.Second
 	deadline := time.After(consensusTimeout)
 	pollInterval := 200 * time.Millisecond
 	retryInterval := 5 * time.Second
@@ -1048,6 +1054,7 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 			ticket, err := n.stateMachine.GetTicket(ticketID)
 			if err == nil && ticket != nil && ticket.State == state.StateValidated {
 				fmt.Printf("Node %s: ✅ Ticket %s confirmed validated via consensus replication\n", n.nodeID, ticketID)
+				n.pbftNode.ClearPendingRequest()
 				return nil
 			}
 		}
