@@ -18,16 +18,16 @@ import (
 
 // Server represents the API server
 type Server struct {
-	router      *mux.Router
-	httpServer  *http.Server
-	validator   ValidatorInterface
-	wsClients   map[*websocket.Conn]bool
-	wsUpgrader  websocket.Upgrader
-	wsMu        sync.RWMutex
-	broadcast   chan interface{}
-	ctx         context.Context
-	cancel      context.CancelFunc
-	apiKey      string
+	router     *mux.Router
+	httpServer *http.Server
+	validator  ValidatorInterface
+	wsClients  map[*websocket.Conn]bool
+	wsUpgrader websocket.Upgrader
+	wsMu       sync.RWMutex
+	broadcast  chan interface{}
+	ctx        context.Context
+	cancel     context.CancelFunc
+	apiKey     string
 }
 
 // ValidatorInterface defines the interface for validator operations
@@ -294,8 +294,8 @@ func (s *Server) handleGetAllTickets(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	status := map[string]interface{}{
-		"status":    "running",
-		"timestamp": time.Now().Unix(),
+		"status":     "running",
+		"timestamp":  time.Now().Unix(),
 		"ws_clients": len(s.wsClients),
 	}
 
@@ -415,9 +415,7 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 }
 
 // checkWSOrigin validates WebSocket connection origins to prevent cross-site
-// WebSocket hijacking. Allows same-origin, localhost, and origins listed in
-// the DTVN_WS_ORIGINS environment variable (comma-separated).
-// Requests without an Origin header (non-browser clients) are always allowed.
+// WebSocket hijacking. It allows same-origin requests, localhost for development, and any additional origins specified
 func checkWSOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
@@ -454,7 +452,6 @@ func checkWSOrigin(r *http.Request) bool {
 }
 
 // apiKeyMiddleware enforces API key authentication when an API key is configured.
-// Exempt paths: /health, /ws, and static files (non-/api/ paths).
 func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path

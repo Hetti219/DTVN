@@ -221,9 +221,6 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 	stateMachine := state.NewStateMachine(cfg.NodeID)
 
 	// Initialize PBFT consensus
-	// ViewTimeout of 15 seconds allows sufficient time for PBFT three-phase commit
-	// to complete across network latency. 5 seconds was too aggressive and caused
-	// premature view changes before PREPARE votes could be collected.
 	pbftNode, err := consensus.NewPBFTNode(ctx, &consensus.Config{
 		NodeID:      cfg.NodeID,
 		TotalNodes:  cfg.TotalNodes,
@@ -339,11 +336,9 @@ func (n *ValidatorNode) Start() error {
 	}
 
 	// Start periodic anti-entropy mechanism for state synchronization
-	// This ensures eventual consistency by periodically syncing state with random peers
 	go n.runAntiEntropy()
 
-	// Immediately request state sync from a peer on startup to recover
-	// any state missed during downtime (e.g., after partition recovery)
+	// Immediately request state sync from a peer on startup to recover any state missed during downtime (e.g., after partition recovery)
 	go func() {
 		time.Sleep(1 * time.Second) // Brief delay to let connections settle
 		n.performAntiEntropySync()
@@ -390,8 +385,6 @@ func (n *ValidatorNode) Stop() error {
 }
 
 // runAntiEntropy runs periodic state synchronization with random peers
-// This implements an anti-entropy protocol to ensure eventual consistency
-// by periodically exchanging state with other nodes in the network.
 func (n *ValidatorNode) runAntiEntropy() {
 	// Anti-entropy interval: sync with a random peer every 5 seconds
 	ticker := time.NewTicker(5 * time.Second)
@@ -419,7 +412,6 @@ func (n *ValidatorNode) performAntiEntropySync() {
 	}
 
 	// Pick a random peer for anti-entropy exchange
-	// Using a simple random selection based on current time
 	randomIndex := time.Now().UnixNano() % int64(len(peers))
 	selectedPeer := peers[randomIndex]
 
@@ -543,8 +535,7 @@ func (n *ValidatorNode) setupHandlers() {
 
 	// Register consensus handler
 	n.pbftNode.RegisterHandler(func(req *consensus.Request) error {
-		// Use the originating node's ID from the request so all nodes
-		// store the same ValidatorID after consensus commits.
+		// Use the originating node's ID from the request so all nodes store the same ValidatorID after consensus commits.
 		validatorID := req.NodeID
 		if validatorID == "" {
 			validatorID = n.nodeID // fallback for older requests without NodeID
@@ -567,8 +558,6 @@ func (n *ValidatorNode) setupHandlers() {
 	})
 
 	// Register state replicator for reliable state propagation after consensus commits
-	// This broadcasts state updates directly to ALL peers (not probabilistic gossip)
-	// to ensure reliable delivery of committed state changes.
 	n.pbftNode.RegisterStateReplicator(func(req *consensus.Request) error {
 		// Get the ticket state that was just committed
 		ticket, err := n.stateMachine.GetTicket(req.TicketID)
@@ -589,8 +578,7 @@ func (n *ValidatorNode) setupHandlers() {
 			protoState = pb.State_PENDING
 		}
 
-		// Convert vector clock to protobuf format for proper causality ordering
-		// on receiving nodes (ensures MergeState can correctly compare versions)
+		// Convert vector clock to protobuf format for proper causality ordering on receiving nodes (ensures MergeState can correctly compare versions)
 		var protoVC *pb.VectorClock
 		if ticket.VectorClock != nil {
 			protoVC = &pb.VectorClock{
@@ -599,8 +587,6 @@ func (n *ValidatorNode) setupHandlers() {
 		}
 
 		// Create state update message with consensus confirmation.
-		// Include Data (as Metadata) and VectorClock so receiving nodes
-		// get the full ticket state and can properly order concurrent updates.
 		update := &pb.StateUpdate{
 			Tickets: []*pb.TicketState{{
 				TicketId:    ticket.ID,
@@ -661,7 +647,6 @@ func (n *ValidatorNode) setupHandlers() {
 	// Register gossip handler
 	n.gossipEngine.RegisterHandler(func(msg *gossip.Message) error {
 		// Handle gossip message
-		// In production, deserialize and process
 		return nil
 	})
 
@@ -703,7 +688,6 @@ func (n *ValidatorNode) requestStateSync(peerID peer.ID) {
 	fmt.Printf("StateSync: Requesting state from peer %s (current seq: %d)\n", peerID, currentSeq)
 
 	// Create state sync request.
-	// Use libp2p peer ID (not nodeID) so the responder can SendTo us.
 	request := &pb.StateSyncRequest{
 		RequesterId:  n.p2pHost.ID().String(),
 		LastSequence: currentSeq,
@@ -908,8 +892,6 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 		fmt.Printf("Node %s: ✅ Received validation request for ticket %s (I am primary)\n", n.nodeID, ticketID)
 
 		// Check peer connectivity for multi-node setup.
-		// PBFT requires 2f+1 votes where f = (n-1)/3. The primary counts as one
-		// of the 2f+1, so we need at least 2f peers to reach quorum.
 		peerCount := n.p2pHost.GetPeerCount()
 		f := (n.totalNodes - 1) / 3 // max Byzantine faults
 		minPeers := 2 * f           // minimum peers needed (quorum = 2f+1, minus self)
@@ -944,7 +926,6 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 		}
 
 		// Wait for consensus to complete or timeout
-		// Use a timeout slightly longer than the view timeout to allow for consensus
 		consensusTimeout := 20 * time.Second
 		select {
 		case err := <-resultChan:
@@ -965,7 +946,6 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 	fmt.Printf("Node %s: 📤 Forwarding validation request for ticket %s to primary %s\n", n.nodeID, ticketID, primary)
 
 	// Wait for peers to connect (with retry)
-	// This handles the race condition where API starts before peer discovery completes
 	maxRetries := 5
 	retryDelay := 1 * time.Second
 	var peerCount int
@@ -1019,17 +999,9 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 	fmt.Printf("Node %s: 📤 Successfully forwarded request for ticket %s to %d peers, waiting for consensus...\n", n.nodeID, ticketID, peerCount)
 
 	// Arm the PBFT view change timer for dead primary detection.
-	// If the primary doesn't start consensus within the view timeout,
-	// a view change will be triggered to elect a new primary.
 	n.pbftNode.NotifyPendingRequest()
 
 	// Wait for consensus to replicate the ticket to this node.
-	// The primary will process the forwarded request, run PBFT consensus,
-	// and the StateReplicator will broadcast the committed state to all peers
-	// (including this node). Poll local state until the ticket appears.
-	// If the primary rejects due to insufficient peers or the broadcast is lost,
-	// retry the broadcast every 5 seconds.
-	// Timeout is 40s to accommodate potential view change (15s) + new consensus.
 	consensusTimeout := 40 * time.Second
 	deadline := time.After(consensusTimeout)
 	pollInterval := 200 * time.Millisecond
@@ -1271,7 +1243,6 @@ func (n *ValidatorNode) loadTicketsFromStore() {
 
 // SeedTickets generates and loads 500 deterministic dummy "purchased" tickets
 // into the node's state machine and persists them to BoltDB.
-// This simulates the pre-event ticket sales database that every node should have.
 func (n *ValidatorNode) SeedTickets() (int, error) {
 	sections := []string{"VIP", "Floor", "Balcony", "General"}
 	prices := []string{"150.00", "85.00", "65.00", "40.00"}

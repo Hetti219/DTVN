@@ -318,20 +318,20 @@ func (s *Store) Backup(path string) error {
 func (s *Store) GetStats() map[string]interface{} {
 	stats := s.db.Stats()
 	return map[string]interface{}{
-		"tx_count":        stats.TxN,
-		"open_tx_count":   stats.OpenTxN,
-		"page_count":      stats.TxStats.PageCount,
-		"page_alloc":      stats.TxStats.PageAlloc,
-		"cursor_count":    stats.TxStats.CursorCount,
-		"node_count":      stats.TxStats.NodeCount,
-		"node_deref":      stats.TxStats.NodeDeref,
-		"rebalance":       stats.TxStats.Rebalance,
-		"rebalance_time":  stats.TxStats.RebalanceTime,
-		"split":           stats.TxStats.Split,
-		"spill":           stats.TxStats.Spill,
-		"spill_time":      stats.TxStats.SpillTime,
-		"write":           stats.TxStats.Write,
-		"write_time":      stats.TxStats.WriteTime,
+		"tx_count":       stats.TxN,
+		"open_tx_count":  stats.OpenTxN,
+		"page_count":     stats.TxStats.PageCount,
+		"page_alloc":     stats.TxStats.PageAlloc,
+		"cursor_count":   stats.TxStats.CursorCount,
+		"node_count":     stats.TxStats.NodeCount,
+		"node_deref":     stats.TxStats.NodeDeref,
+		"rebalance":      stats.TxStats.Rebalance,
+		"rebalance_time": stats.TxStats.RebalanceTime,
+		"split":          stats.TxStats.Split,
+		"spill":          stats.TxStats.Spill,
+		"spill_time":     stats.TxStats.SpillTime,
+		"write":          stats.TxStats.Write,
+		"write_time":     stats.TxStats.WriteTime,
 	}
 }
 
@@ -341,7 +341,6 @@ func (s *Store) Close() error {
 }
 
 // Compact performs database compaction (not directly supported by BoltDB)
-// This creates a new database and copies data over
 func (s *Store) Compact(newPath string) error {
 	// Create new database
 	newDB, err := bolt.Open(newPath, 0600, &bolt.Options{Timeout: 10 * time.Second})

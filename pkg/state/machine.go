@@ -113,7 +113,7 @@ func (sm *StateMachine) SeedTickets(tickets []*Ticket) (int, error) {
 }
 
 // ValidateTicket validates a ticket and transitions it from ISSUED to VALIDATED state.
-// The ticket must already exist (i.e., it was issued/sold before the event).
+// The ticket must already exist
 func (sm *StateMachine) ValidateTicket(ticketID string, validatorID string, data []byte) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -167,13 +167,9 @@ func (sm *StateMachine) ValidateTicket(ticketID string, validatorID string, data
 	}
 
 	// Publish state update via gossip SYNCHRONOUSLY
-	// This ensures the state update is published before the handler returns,
-	// preventing race conditions where the API returns success but the state
-	// hasn't been replicated to other nodes yet.
 	if sm.publishUpdate != nil {
 		if err := sm.publishUpdate(ticketID, StateValidated, validatorID, ticket.Timestamp); err != nil {
-			// Log the error but don't fail - the state was applied locally
-			// and gossip will eventually propagate it via anti-entropy
+			// Log the error but don't fail
 			fmt.Printf("Warning: Failed to publish state update (will retry via anti-entropy): %v\n", err)
 		}
 	}
