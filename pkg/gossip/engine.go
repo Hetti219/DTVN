@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -335,9 +336,5 @@ func serializeMessage(msg *Message) []byte {
 // serializeDigests serializes message digests (simplified)
 func serializeDigests(digests []string) []byte {
 	// In production, use protobuf
-	result := ""
-	for _, d := range digests {
-		result += d + ","
-	}
-	return []byte(result)
+	return []byte(strings.Join(digests, ","))
 }
