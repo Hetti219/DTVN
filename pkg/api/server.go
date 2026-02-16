@@ -371,20 +371,26 @@ func (s *Server) broadcastLoop() {
 		case <-s.ctx.Done():
 			return
 		case msg := <-s.broadcast:
+			// Snapshot client list under lock, then release before doing I/O.
+			// This avoids holding the lock during potentially slow WriteJSON calls,
+			// and eliminates the unsafe RUnlock→Lock→Unlock→RLock juggling mid-iteration.
 			s.wsMu.RLock()
+			clients := make([]*websocket.Conn, 0, len(s.wsClients))
 			for client := range s.wsClients {
-				err := client.WriteJSON(msg)
-				if err != nil {
+				clients = append(clients, client)
+			}
+			s.wsMu.RUnlock()
+
+			// Write to each client without holding any lock
+			for _, client := range clients {
+				if err := client.WriteJSON(msg); err != nil {
 					fmt.Printf("WebSocket write error: %v\n", err)
 					client.Close()
-					s.wsMu.RUnlock()
 					s.wsMu.Lock()
 					delete(s.wsClients, client)
 					s.wsMu.Unlock()
-					s.wsMu.RLock()
 				}
 			}
-			s.wsMu.RUnlock()
 		}
 	}
 }
