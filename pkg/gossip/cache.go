@@ -142,7 +142,7 @@ func NewBloomFilter(capacity int, fpRate float64) *BloomFilter {
 	// k = (m/n) * ln(2)
 
 	size := capacity * 10 // Simplified: 10 bits per element
-	hashCount := 7         // Simplified: use 7 hash functions
+	hashCount := 7        // Simplified: use 7 hash functions
 
 	return &BloomFilter{
 		bits:      make([]bool, size),

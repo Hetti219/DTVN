@@ -152,8 +152,8 @@ func (m *MockValidator) GetConsensusLogs() ([]interface{}, error) {
 
 func (m *MockValidator) GetNodeCryptoInfo() map[string]interface{} {
 	return map[string]interface{}{
-		"node_id":   "test-node",
-		"peer_id":   "test-peer-id",
+		"node_id":    "test-node",
+		"peer_id":    "test-peer-id",
 		"public_key": "abcdef1234567890",
 	}
 }

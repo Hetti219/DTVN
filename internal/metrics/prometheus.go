@@ -113,7 +113,7 @@ var (
 	StorageLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "storage_latency_seconds",
-			Help: "Storage operation latency in seconds",
+			Help:    "Storage operation latency in seconds",
 			Buckets: prometheus.DefBuckets,
 		},
 		[]string{"operation"},

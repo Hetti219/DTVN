@@ -43,4 +43,3 @@ func (s *Server) setupStaticRoutes() {
 	fileServer := http.FileServer(http.Dir(staticDir))
 	s.router.PathPrefix("/").Handler(fileServer)
 }
-

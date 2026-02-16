@@ -27,9 +27,9 @@ type Assertion struct {
 
 // TestRunner orchestrates integration test execution
 type TestRunner struct {
-	config   *TestConfig
+	config    *TestConfig
 	scenarios []TestScenario
-	results  []TestResult
+	results   []TestResult
 }
 
 // NewTestRunner creates a new test runner

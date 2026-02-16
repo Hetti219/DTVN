@@ -29,30 +29,30 @@ type Simulator struct {
 
 // SimulationStats tracks simulation statistics
 type SimulationStats struct {
-	TotalTickets       int
-	ValidatedTickets   int
-	ConsumedTickets    int
-	DisputedTickets    int
-	ConsensusRounds    int
-	SuccessfulRounds   int
-	FailedRounds       int
-	AverageLatencyMs   float64
-	MessagesSent       int64
-	MessagesReceived   int64
-	PartitionEvents    int
-	ByzantineDetected  int
+	TotalTickets      int
+	ValidatedTickets  int
+	ConsumedTickets   int
+	DisputedTickets   int
+	ConsensusRounds   int
+	SuccessfulRounds  int
+	FailedRounds      int
+	AverageLatencyMs  float64
+	MessagesSent      int64
+	MessagesReceived  int64
+	PartitionEvents   int
+	ByzantineDetected int
 }
 
 // SimulatedNode represents a simulated validator node
 type SimulatedNode struct {
-	ID              string
-	IsByzantine     bool
-	IsPartitioned   bool
-	MessageQueue    chan SimulatedMessage
-	TicketState     map[string]string
-	ConsensusLog    []ConsensusEntry
-	VectorClock     map[string]int
-	mu              sync.RWMutex
+	ID            string
+	IsByzantine   bool
+	IsPartitioned bool
+	MessageQueue  chan SimulatedMessage
+	TicketState   map[string]string
+	ConsensusLog  []ConsensusEntry
+	VectorClock   map[string]int
+	mu            sync.RWMutex
 }
 
 // SimulatedMessage represents a network message

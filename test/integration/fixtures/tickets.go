@@ -19,9 +19,9 @@ func GenerateTicket(prefix string, index int) *TestTicket {
 	ticketID := fmt.Sprintf("%s-%d-%s", prefix, index, generateRandomID())
 
 	return &TestTicket{
-		ID:       ticketID,
-		Data:     []byte(fmt.Sprintf("Test ticket data for %s", ticketID)),
-		EventID:  fmt.Sprintf("EVENT-%d", index%10),
+		ID:      ticketID,
+		Data:    []byte(fmt.Sprintf("Test ticket data for %s", ticketID)),
+		EventID: fmt.Sprintf("EVENT-%d", index%10),
 		Metadata: map[string]string{
 			"type":     "integration_test",
 			"index":    fmt.Sprintf("%d", index),
@@ -42,13 +42,13 @@ func GenerateTickets(prefix string, count int) []*TestTicket {
 // GenerateDuplicateTicket creates a ticket with the same ID as an existing ticket
 func GenerateDuplicateTicket(original *TestTicket) *TestTicket {
 	return &TestTicket{
-		ID:       original.ID,
-		Data:     []byte(fmt.Sprintf("Duplicate data for %s", original.ID)),
-		EventID:  original.EventID,
+		ID:      original.ID,
+		Data:    []byte(fmt.Sprintf("Duplicate data for %s", original.ID)),
+		EventID: original.EventID,
 		Metadata: map[string]string{
-			"type":       "duplicate_test",
-			"original":   "false",
-			"event_id":   original.EventID,
+			"type":     "duplicate_test",
+			"original": "false",
+			"event_id": original.EventID,
 		},
 	}
 }

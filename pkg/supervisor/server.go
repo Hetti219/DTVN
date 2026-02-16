@@ -19,18 +19,18 @@ import (
 
 // Server represents the supervisor HTTP server
 type Server struct {
-	addr           string
-	router         *mux.Router
-	server         *http.Server
-	nodeManager    *NodeManager
-	simController  *SimulatorController
-	wsClients      map[*websocket.Conn]bool
-	wsMu           sync.RWMutex
-	wsWriteMu      sync.Mutex // Serializes WebSocket writes to prevent concurrent write panic
-	wsUpgrader     websocket.Upgrader
-	staticDir      string
-	apiKey         string
-	stopCh         chan struct{} // signals background goroutines to stop
+	addr          string
+	router        *mux.Router
+	server        *http.Server
+	nodeManager   *NodeManager
+	simController *SimulatorController
+	wsClients     map[*websocket.Conn]bool
+	wsMu          sync.RWMutex
+	wsWriteMu     sync.Mutex // Serializes WebSocket writes to prevent concurrent write panic
+	wsUpgrader    websocket.Upgrader
+	staticDir     string
+	apiKey        string
+	stopCh        chan struct{} // signals background goroutines to stop
 }
 
 // ServerConfig holds server configuration

@@ -37,16 +37,16 @@ type SimulatorConfig struct {
 
 // SimulatorResults holds simulation results
 type SimulatorResults struct {
-	TotalTickets      int     `json:"total_tickets"`
-	ValidatedTickets  int     `json:"validated_tickets"`
-	ConsensusRounds   int     `json:"consensus_rounds"`
-	SuccessfulRounds  int     `json:"successful_rounds"`
-	FailedRounds      int     `json:"failed_rounds"`
-	SuccessRate       float64 `json:"success_rate"`
-	MessagesSent      int64   `json:"messages_sent"`
-	MessagesReceived  int64   `json:"messages_received"`
-	PartitionEvents   int     `json:"partition_events"`
-	AverageLatencyMs  float64 `json:"average_latency_ms"`
+	TotalTickets     int     `json:"total_tickets"`
+	ValidatedTickets int     `json:"validated_tickets"`
+	ConsensusRounds  int     `json:"consensus_rounds"`
+	SuccessfulRounds int     `json:"successful_rounds"`
+	FailedRounds     int     `json:"failed_rounds"`
+	SuccessRate      float64 `json:"success_rate"`
+	MessagesSent     int64   `json:"messages_sent"`
+	MessagesReceived int64   `json:"messages_received"`
+	PartitionEvents  int     `json:"partition_events"`
+	AverageLatencyMs float64 `json:"average_latency_ms"`
 }
 
 // SimulatorProgress holds current progress
@@ -77,9 +77,9 @@ type SimulatorController struct {
 	resultCallback   func(results *SimulatorResults)
 
 	// Deduplication fields
-	dedupMu      sync.Mutex
-	recentLines  map[string]time.Time
-	dedupWindow  time.Duration
+	dedupMu     sync.Mutex
+	recentLines map[string]time.Time
+	dedupWindow time.Duration
 }
 
 // SimulatorControllerConfig holds controller configuration

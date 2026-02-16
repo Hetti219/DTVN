@@ -30,58 +30,58 @@ func projectRoot() string {
 // TestConfig defines the configuration for integration tests
 type TestConfig struct {
 	// Network configuration
-	NumNodes           int           `json:"num_nodes"`
-	ByzantineNodes     []int         `json:"byzantine_nodes"`      // Indices of Byzantine nodes
-	BootstrapPort      int           `json:"bootstrap_port"`
-	APIPortStart       int           `json:"api_port_start"`
-	P2PPortStart       int           `json:"p2p_port_start"`
+	NumNodes       int   `json:"num_nodes"`
+	ByzantineNodes []int `json:"byzantine_nodes"` // Indices of Byzantine nodes
+	BootstrapPort  int   `json:"bootstrap_port"`
+	APIPortStart   int   `json:"api_port_start"`
+	P2PPortStart   int   `json:"p2p_port_start"`
 
 	// Test behavior
-	TestTimeout        time.Duration `json:"test_timeout"`
-	NodeStartupDelay   time.Duration `json:"node_startup_delay"`
-	ConsensusWaitTime  time.Duration `json:"consensus_wait_time"`
+	TestTimeout       time.Duration `json:"test_timeout"`
+	NodeStartupDelay  time.Duration `json:"node_startup_delay"`
+	ConsensusWaitTime time.Duration `json:"consensus_wait_time"`
 
 	// Network conditions
-	NetworkLatency     time.Duration `json:"network_latency"`
-	PacketLossRate     float64       `json:"packet_loss_rate"`
-	EnablePartitions   bool          `json:"enable_partitions"`
+	NetworkLatency   time.Duration `json:"network_latency"`
+	PacketLossRate   float64       `json:"packet_loss_rate"`
+	EnablePartitions bool          `json:"enable_partitions"`
 
 	// Test data
-	TicketPrefix       string        `json:"ticket_prefix"`
+	TicketPrefix string `json:"ticket_prefix"`
 
 	// Directories
-	DataDir            string        `json:"data_dir"`
-	LogsDir            string        `json:"logs_dir"`
-	ValidatorBinary    string        `json:"validator_binary"`
+	DataDir         string `json:"data_dir"`
+	LogsDir         string `json:"logs_dir"`
+	ValidatorBinary string `json:"validator_binary"`
 
 	// Assertions
-	RequiredConsensus  float64       `json:"required_consensus"` // 0.0-1.0 (e.g., 0.66 for 2f+1)
-	MaxLatency         time.Duration `json:"max_latency"`
-	MaxP95Latency      time.Duration `json:"max_p95_latency"`
+	RequiredConsensus float64       `json:"required_consensus"` // 0.0-1.0 (e.g., 0.66 for 2f+1)
+	MaxLatency        time.Duration `json:"max_latency"`
+	MaxP95Latency     time.Duration `json:"max_p95_latency"`
 }
 
 // DefaultTestConfig returns a default test configuration
 func DefaultTestConfig() *TestConfig {
 	root := projectRoot()
 	return &TestConfig{
-		NumNodes:           9,
-		ByzantineNodes:     []int{},
-		BootstrapPort:      14001,
-		APIPortStart:       18000,
-		P2PPortStart:       14000,
-		TestTimeout:        5 * time.Minute,
-		NodeStartupDelay:   2 * time.Second,
-		ConsensusWaitTime:  5 * time.Second,
-		NetworkLatency:     50 * time.Millisecond,
-		PacketLossRate:     0.0,
-		EnablePartitions:   false,
-		TicketPrefix:       "TEST-TICKET",
-		DataDir:            filepath.Join(root, "test-data", "integration"),
-		LogsDir:            filepath.Join(root, "test-data", "logs"),
-		ValidatorBinary:    filepath.Join(root, "bin", "validator"),
-		RequiredConsensus:  0.66,
-		MaxLatency:         1000 * time.Millisecond,
-		MaxP95Latency:      2000 * time.Millisecond,
+		NumNodes:          9,
+		ByzantineNodes:    []int{},
+		BootstrapPort:     14001,
+		APIPortStart:      18000,
+		P2PPortStart:      14000,
+		TestTimeout:       5 * time.Minute,
+		NodeStartupDelay:  2 * time.Second,
+		ConsensusWaitTime: 5 * time.Second,
+		NetworkLatency:    50 * time.Millisecond,
+		PacketLossRate:    0.0,
+		EnablePartitions:  false,
+		TicketPrefix:      "TEST-TICKET",
+		DataDir:           filepath.Join(root, "test-data", "integration"),
+		LogsDir:           filepath.Join(root, "test-data", "logs"),
+		ValidatorBinary:   filepath.Join(root, "bin", "validator"),
+		RequiredConsensus: 0.66,
+		MaxLatency:        1000 * time.Millisecond,
+		MaxP95Latency:     2000 * time.Millisecond,
 	}
 }
 
@@ -124,12 +124,12 @@ func PacketLossTestConfig() *TestConfig {
 
 // TestResult holds the results of a test run
 type TestResult struct {
-	Scenario       string
-	Success        bool
-	Duration       time.Duration
-	ErrorMessage   string
-	Metrics        *TestMetrics
-	NodeResults    map[string]*NodeTestResult
+	Scenario     string
+	Success      bool
+	Duration     time.Duration
+	ErrorMessage string
+	Metrics      *TestMetrics
+	NodeResults  map[string]*NodeTestResult
 }
 
 // TestMetrics holds test metrics
