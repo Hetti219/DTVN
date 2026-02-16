@@ -25,6 +25,10 @@ type Simulator struct {
 	cancel           context.CancelFunc
 	mu               sync.RWMutex
 	stats            *SimulationStats
+	honestNodes      []*SimulatedNode // cached honest node list (never changes)
+	// Incremental tracking: ticketID -> set of honest node IDs that validated it
+	ticketValidations map[string]map[string]struct{}
+	quorumThreshold   int
 }
 
 // SimulationStats tracks simulation statistics
@@ -247,6 +251,22 @@ func (s *Simulator) createNodes() []*SimulatedNode {
 		}
 	}
 
+	// Cache honest nodes list (never changes during simulation)
+	s.honestNodes = make([]*SimulatedNode, 0, s.nodeCount-s.byzantineCount)
+	for _, node := range nodes {
+		if !node.IsByzantine {
+			s.honestNodes = append(s.honestNodes, node)
+		}
+	}
+
+	// Pre-compute quorum threshold
+	if len(s.honestNodes) >= 2 {
+		s.quorumThreshold = (len(s.honestNodes) * 2 / 3) + 1
+	}
+
+	// Initialize incremental ticket validation tracking
+	s.ticketValidations = make(map[string]map[string]struct{}, s.ticketCount)
+
 	return nodes
 }
 
@@ -396,40 +416,34 @@ func (s *Simulator) simulateNetworkPartition(nodes []*SimulatedNode) {
 	}()
 }
 
-// updateStats updates simulation statistics
+// updateStats updates simulation statistics incrementally.
+// Instead of rescanning all nodes' ticket maps from scratch each round (O(nodes × tickets)),
+// this checks only for new validations since the last update, making each call O(nodes) amortized.
 func (s *Simulator) updateStats(nodes []*SimulatedNode, round int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.stats.ConsensusRounds = round
 
-	// Check consensus agreement among honest nodes using quorum (2/3+)
-	var honestNodes []*SimulatedNode
-	for _, node := range nodes {
-		if !node.IsByzantine {
-			honestNodes = append(honestNodes, node)
-		}
-	}
-
-	if len(honestNodes) >= 2 {
-		// Count how many tickets each honest node has validated
-		ticketValidations := make(map[string]int)
-
-		for _, node := range honestNodes {
+	if len(s.honestNodes) >= 2 {
+		// Incrementally update ticket validations: check each honest node for new entries
+		for _, node := range s.honestNodes {
 			node.mu.RLock()
 			for ticketID := range node.TicketState {
-				ticketValidations[ticketID]++
+				validators, exists := s.ticketValidations[ticketID]
+				if !exists {
+					validators = make(map[string]struct{}, len(s.honestNodes))
+					s.ticketValidations[ticketID] = validators
+				}
+				validators[node.ID] = struct{}{}
 			}
 			node.mu.RUnlock()
 		}
 
-		// Calculate quorum threshold (2/3 of honest nodes)
-		quorumThreshold := (len(honestNodes) * 2 / 3) + 1
-
 		// Count tickets that reached quorum
 		successfulCount := 0
-		for _, validationCount := range ticketValidations {
-			if validationCount >= quorumThreshold {
+		for _, validators := range s.ticketValidations {
+			if len(validators) >= s.quorumThreshold {
 				successfulCount++
 			}
 		}
@@ -439,14 +453,14 @@ func (s *Simulator) updateStats(nodes []*SimulatedNode, round int) {
 	}
 
 	// Count validated tickets (average across all nodes)
-	validatedCount := 0
+	totalValidated := 0
 	for _, node := range nodes {
 		node.mu.RLock()
-		validatedCount += len(node.TicketState)
+		totalValidated += len(node.TicketState)
 		node.mu.RUnlock()
 	}
 	if len(nodes) > 0 {
-		s.stats.ValidatedTickets = validatedCount / len(nodes)
+		s.stats.ValidatedTickets = totalValidated / len(nodes)
 	}
 }
 
