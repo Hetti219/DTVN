@@ -1,6 +1,7 @@
 package types
 
 import (
+	"fmt"
 	"time"
 )
 
@@ -107,7 +108,7 @@ type ErrConsensusFailure struct {
 }
 
 func (e *ErrConsensusFailure) Error() string {
-	return "consensus failure at sequence " + string(rune(e.Sequence)) + ": " + e.Reason
+	return fmt.Sprintf("consensus failure at sequence %d: %s", e.Sequence, e.Reason)
 }
 
 // ErrInsufficientQuorum is returned when there's insufficient quorum
@@ -117,5 +118,5 @@ type ErrInsufficientQuorum struct {
 }
 
 func (e *ErrInsufficientQuorum) Error() string {
-	return "insufficient quorum: required " + string(rune(e.Required)) + ", got " + string(rune(e.Actual))
+	return fmt.Sprintf("insufficient quorum: required %d, got %d", e.Required, e.Actual)
 }
