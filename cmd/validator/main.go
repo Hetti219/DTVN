@@ -24,17 +24,18 @@ import (
 
 // ValidatorNode represents a complete validator node
 type ValidatorNode struct {
-	nodeID       string
-	totalNodes   int
-	p2pHost      *network.P2PHost
-	discovery    *network.Discovery
-	gossipEngine *gossip.GossipEngine
-	pbftNode     *consensus.PBFTNode
-	stateMachine *state.StateMachine
-	storage      *storage.Store
-	apiServer    *api.Server
-	ctx          context.Context
-	cancel       context.CancelFunc
+	nodeID        string
+	totalNodes    int
+	p2pHost       *network.P2PHost
+	discovery     *network.Discovery
+	gossipEngine  *gossip.GossipEngine
+	pbftNode      *consensus.PBFTNode
+	stateMachine  *state.StateMachine
+	stateNotifier *state.StateNotifier
+	storage       *storage.Store
+	apiServer     *api.Server
+	ctx           context.Context
+	cancel        context.CancelFunc
 }
 
 // Config holds validator configuration
@@ -217,8 +218,9 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 		return nil, fmt.Errorf("failed to initialize gossip engine: %w", err)
 	}
 
-	// Initialize state machine
+	// Initialize state machine and notifier
 	stateMachine := state.NewStateMachine(cfg.NodeID)
+	stateNotifier := state.NewStateNotifier()
 
 	// Initialize PBFT consensus
 	pbftNode, err := consensus.NewPBFTNode(ctx, &consensus.Config{
@@ -235,17 +237,24 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 		return nil, fmt.Errorf("failed to initialize PBFT: %w", err)
 	}
 
+	// Register state notifier so waiters get event-driven notifications
+	stateMachine.RegisterHandler(func(ticket *state.Ticket, oldState, newState state.TicketState) error {
+		stateNotifier.Notify(ticket.ID, newState)
+		return nil
+	})
+
 	node := &ValidatorNode{
-		nodeID:       cfg.NodeID,
-		totalNodes:   cfg.TotalNodes,
-		p2pHost:      p2pHost,
-		discovery:    discovery,
-		gossipEngine: gossipEngine,
-		pbftNode:     pbftNode,
-		stateMachine: stateMachine,
-		storage:      store,
-		ctx:          ctx,
-		cancel:       cancel,
+		nodeID:        cfg.NodeID,
+		totalNodes:    cfg.TotalNodes,
+		p2pHost:       p2pHost,
+		discovery:     discovery,
+		gossipEngine:  gossipEngine,
+		pbftNode:      pbftNode,
+		stateMachine:  stateMachine,
+		stateNotifier: stateNotifier,
+		storage:       store,
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 
 	// Initialize API server
@@ -1001,10 +1010,20 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 	// Arm the PBFT view change timer for dead primary detection.
 	n.pbftNode.NotifyPendingRequest()
 
+	// Subscribe for state change notifications instead of polling.
+	stateCh := n.stateNotifier.Subscribe(ticketID)
+	defer n.stateNotifier.Unsubscribe(ticketID, stateCh)
+
+	// Check if the ticket was already validated before we subscribed (race window).
+	if ticket, err := n.stateMachine.GetTicket(ticketID); err == nil && ticket != nil && ticket.State == state.StateValidated {
+		fmt.Printf("Node %s: ✅ Ticket %s confirmed validated via consensus replication\n", n.nodeID, ticketID)
+		n.pbftNode.ClearPendingRequest()
+		return nil
+	}
+
 	// Wait for consensus to replicate the ticket to this node.
 	consensusTimeout := 40 * time.Second
 	deadline := time.After(consensusTimeout)
-	pollInterval := 200 * time.Millisecond
 	retryInterval := 5 * time.Second
 	retryTicker := time.NewTicker(retryInterval)
 	defer retryTicker.Stop()
@@ -1022,9 +1041,8 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 				fmt.Printf("Node %s: 🔄 Re-broadcast CLIENT_REQUEST for ticket %s\n", n.nodeID, ticketID)
 			}
 			retryCancel()
-		case <-time.After(pollInterval):
-			ticket, err := n.stateMachine.GetTicket(ticketID)
-			if err == nil && ticket != nil && ticket.State == state.StateValidated {
+		case newState := <-stateCh:
+			if newState == state.StateValidated {
 				fmt.Printf("Node %s: ✅ Ticket %s confirmed validated via consensus replication\n", n.nodeID, ticketID)
 				n.pbftNode.ClearPendingRequest()
 				return nil
