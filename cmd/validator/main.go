@@ -23,6 +23,24 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// protoToState maps protobuf State enum values to internal TicketState.
+var protoToState = map[pb.State]state.TicketState{
+	pb.State_ISSUED:    state.StateIssued,
+	pb.State_PENDING:   state.StatePending,
+	pb.State_VALIDATED: state.StateValidated,
+	pb.State_CONSUMED:  state.StateConsumed,
+	pb.State_DISPUTED:  state.StateDisputed,
+}
+
+// stateToProto maps internal TicketState values to protobuf State enum.
+var stateToProto = map[state.TicketState]pb.State{
+	state.StateIssued:    pb.State_ISSUED,
+	state.StatePending:   pb.State_PENDING,
+	state.StateValidated: pb.State_VALIDATED,
+	state.StateConsumed:  pb.State_CONSUMED,
+	state.StateDisputed:  pb.State_DISPUTED,
+}
+
 // ValidatorNode represents a complete validator node
 type ValidatorNode struct {
 	nodeID        string
@@ -443,20 +461,7 @@ func (n *ValidatorNode) setupHandlers() {
 		// Convert protobuf tickets to state.Ticket format
 		tickets := make([]*state.Ticket, len(update.Tickets))
 		for i, ts := range update.Tickets {
-			// Convert protobuf state to internal state
-			var ticketState state.TicketState
-			switch ts.State {
-			case pb.State_ISSUED:
-				ticketState = state.StateIssued
-			case pb.State_PENDING:
-				ticketState = state.StatePending
-			case pb.State_VALIDATED:
-				ticketState = state.StateValidated
-			case pb.State_CONSUMED:
-				ticketState = state.StateConsumed
-			case pb.State_DISPUTED:
-				ticketState = state.StateDisputed
-			}
+			ticketState := protoToState[ts.State]
 
 			// Convert vector clock
 			vc := state.NewVectorClock(n.nodeID)
@@ -494,19 +499,7 @@ func (n *ValidatorNode) setupHandlers() {
 	// Register state publisher - publishes updates via gossip
 	n.stateMachine.RegisterPublisher(func(ticketID string, ticketState state.TicketState, validatorID string, timestamp int64) error {
 		// Convert internal state to protobuf
-		var protoState pb.State
-		switch ticketState {
-		case state.StateIssued:
-			protoState = pb.State_ISSUED
-		case state.StatePending:
-			protoState = pb.State_PENDING
-		case state.StateValidated:
-			protoState = pb.State_VALIDATED
-		case state.StateConsumed:
-			protoState = pb.State_CONSUMED
-		case state.StateDisputed:
-			protoState = pb.State_DISPUTED
-		}
+		protoState := stateToProto[ticketState]
 
 		// Create state update message
 		update := &pb.StateUpdate{
@@ -574,16 +567,9 @@ func (n *ValidatorNode) setupHandlers() {
 			return fmt.Errorf("failed to get committed ticket state: %w", err)
 		}
 
-		// Convert to protobuf state
-		var protoState pb.State
-		switch ticket.State {
-		case state.StateValidated:
-			protoState = pb.State_VALIDATED
-		case state.StateConsumed:
-			protoState = pb.State_CONSUMED
-		case state.StateDisputed:
-			protoState = pb.State_DISPUTED
-		default:
+		// Convert to protobuf state (default to PENDING for unmapped states)
+		protoState, ok := stateToProto[ticket.State]
+		if !ok {
 			protoState = pb.State_PENDING
 		}
 
@@ -757,17 +743,12 @@ func (n *ValidatorNode) handleStateSyncRequest(payload []byte) error {
 	consensusLog := make([]string, 0)
 
 	for _, ticket := range validatedTickets {
-		var protoState pb.State
-		switch ticket.State {
-		case state.StateValidated:
-			protoState = pb.State_VALIDATED
-			consensusLog = append(consensusLog, ticket.ID)
-		case state.StateConsumed:
-			protoState = pb.State_CONSUMED
-		case state.StateDisputed:
-			protoState = pb.State_DISPUTED
-		default:
+		protoState, ok := stateToProto[ticket.State]
+		if !ok || ticket.State == state.StateIssued || ticket.State == state.StatePending {
 			continue // Skip non-consensus states
+		}
+		if ticket.State == state.StateValidated {
+			consensusLog = append(consensusLog, ticket.ID)
 		}
 
 		pbTickets = append(pbTickets, &pb.TicketState{
