@@ -24,6 +24,12 @@ const (
 	SimulatorStatusError    SimulatorStatus = "error"
 )
 
+// Pre-compiled regex patterns for parsing simulator output
+var (
+	progressRegex = regexp.MustCompile(`Progress: (\d+)/(\d+) tickets \| Rounds: (\d+) \| Success: (\d+) \| Failed: (\d+)`)
+	resultRegex   = regexp.MustCompile(`(\w+[\w\s]*): ([\d.]+%?)`)
+)
+
 // SimulatorConfig holds simulator configuration
 type SimulatorConfig struct {
 	Nodes            int     `json:"nodes"`
@@ -253,10 +259,6 @@ func (s *SimulatorController) isDuplicateLine(line string) bool {
 // streamOutput streams output from the simulator
 func (s *SimulatorController) streamOutput(reader io.Reader) {
 	scanner := bufio.NewScanner(reader)
-
-	// Regex patterns for parsing output
-	progressRegex := regexp.MustCompile(`Progress: (\d+)/(\d+) tickets \| Rounds: (\d+) \| Success: (\d+) \| Failed: (\d+)`)
-	resultRegex := regexp.MustCompile(`(\w+[\w\s]*): ([\d.]+%?)`)
 
 	for scanner.Scan() {
 		line := scanner.Text()
