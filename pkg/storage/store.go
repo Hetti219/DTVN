@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -143,6 +144,9 @@ func (s *Store) GetAllTickets() ([]*TicketRecord, error) {
 			return fmt.Errorf("bucket %s not found", BucketTickets)
 		}
 
+		// Pre-allocate with exact count from bucket stats
+		tickets = make([]*TicketRecord, 0, b.Stats().KeyN)
+
 		return b.ForEach(func(k, v []byte) error {
 			ticket := &TicketRecord{}
 			if err := json.Unmarshal(v, ticket); err != nil {
@@ -181,8 +185,7 @@ func (s *Store) SaveConsensusLog(record *ConsensusRecord) error {
 		}
 
 		// Use sequence number as key
-		key := []byte(fmt.Sprintf("%016d", record.Sequence))
-		return b.Put(key, data)
+		return b.Put(sequenceKey(record.Sequence), data)
 	})
 }
 
@@ -196,8 +199,7 @@ func (s *Store) GetConsensusLog(sequence int64) (*ConsensusRecord, error) {
 			return fmt.Errorf("bucket %s not found", BucketConsensus)
 		}
 
-		key := []byte(fmt.Sprintf("%016d", sequence))
-		data := b.Get(key)
+		data := b.Get(sequenceKey(sequence))
 		if data == nil {
 			return fmt.Errorf("consensus log %d not found", sequence)
 		}
@@ -245,8 +247,7 @@ func (s *Store) SaveCheckpoint(checkpoint *CheckpointRecord) error {
 			return fmt.Errorf("failed to marshal checkpoint: %w", err)
 		}
 
-		key := []byte(fmt.Sprintf("%016d", checkpoint.Sequence))
-		return b.Put(key, data)
+		return b.Put(sequenceKey(checkpoint.Sequence), data)
 	})
 }
 
@@ -333,6 +334,23 @@ func (s *Store) GetStats() map[string]interface{} {
 		"write":          stats.TxStats.Write,
 		"write_time":     stats.TxStats.WriteTime,
 	}
+}
+
+// sequenceKey converts an int64 sequence number to a zero-padded key.
+// Uses strconv instead of fmt.Sprintf for lower allocation overhead.
+// Max int64 is 19 digits, so we use a 20-byte buffer for safety.
+func sequenceKey(seq int64) []byte {
+	const width = 20
+	s := strconv.FormatInt(seq, 10)
+	if len(s) >= width {
+		return []byte(s)
+	}
+	var key [width]byte
+	for i := range key {
+		key[i] = '0'
+	}
+	copy(key[width-len(s):], s)
+	return key[:]
 }
 
 // Close closes the database
