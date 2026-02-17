@@ -388,18 +388,21 @@ func generateMessageID(payload []byte) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// selectRandomPeers selects n random peers from the list
+// selectRandomPeers selects n random peers from the list using a partial
+// Fisher-Yates shuffle. Only shuffles n positions instead of the full slice,
+// reducing work from O(len(peers)) to O(n).
 func selectRandomPeers(peers []peer.ID, n int) []peer.ID {
 	if n >= len(peers) {
 		return peers
 	}
 
-	// Fisher-Yates shuffle
+	// Copy to avoid mutating the caller's slice
 	shuffled := make([]peer.ID, len(peers))
 	copy(shuffled, peers)
 
-	for i := len(shuffled) - 1; i > 0; i-- {
-		j := rand.Intn(i + 1)
+	// Partial Fisher-Yates: only shuffle the first n positions
+	for i := 0; i < n; i++ {
+		j := i + rand.Intn(len(shuffled)-i)
 		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 	}
 
