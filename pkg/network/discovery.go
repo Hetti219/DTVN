@@ -18,6 +18,9 @@ const (
 	ValidatorRendezvous = "validator-network"
 	// DiscoveryInterval is how often we re-advertise and discover peers
 	DiscoveryInterval = 10 * time.Second
+	// MaxConcurrentConnections limits simultaneous outgoing peer connection attempts
+	// during discovery to prevent connection storms.
+	MaxConcurrentConnections = 5
 )
 
 // Discovery handles peer discovery using Kademlia DHT
@@ -139,6 +142,9 @@ func (d *Discovery) discoverPeers() {
 		return
 	}
 
+	// Semaphore to limit concurrent outgoing connection attempts
+	sem := make(chan struct{}, MaxConcurrentConnections)
+
 	// Process discovered peers
 	for peerInfo := range peerChan {
 		// Skip ourselves
@@ -161,8 +167,11 @@ func (d *Discovery) discoverPeers() {
 			d.onPeerFound(peerInfo)
 		}
 
-		// Try to connect
+		// Try to connect (bounded concurrency)
+		sem <- struct{}{} // Acquire
 		go func(pi peer.AddrInfo) {
+			defer func() { <-sem }() // Release
+
 			connectCtx, cancel := context.WithTimeout(d.ctx, 10*time.Second)
 			defer cancel()
 
