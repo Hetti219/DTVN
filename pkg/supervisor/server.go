@@ -28,6 +28,7 @@ type Server struct {
 	wsMu          sync.RWMutex
 	wsWriteMu     sync.Mutex // Serializes WebSocket writes to prevent concurrent write panic
 	wsUpgrader    websocket.Upgrader
+	proxyClient   *http.Client // Shared HTTP client for proxy requests (reuses connections)
 	staticDir     string
 	apiKey        string
 	stopCh        chan struct{} // signals background goroutines to stop
@@ -56,12 +57,13 @@ func NewServer(cfg *ServerConfig) *Server {
 	addr := fmt.Sprintf("%s:%d", cfg.Address, cfg.Port)
 
 	s := &Server{
-		addr:      addr,
-		router:    mux.NewRouter(),
-		wsClients: make(map[*websocket.Conn]bool),
-		staticDir: cfg.StaticDir,
-		apiKey:    cfg.APIKey,
-		stopCh:    make(chan struct{}),
+		addr:        addr,
+		router:      mux.NewRouter(),
+		wsClients:   make(map[*websocket.Conn]bool),
+		proxyClient: &http.Client{Timeout: 15 * time.Second},
+		staticDir:   cfg.StaticDir,
+		apiKey:      cfg.APIKey,
+		stopCh:      make(chan struct{}),
 		wsUpgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
