@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"math/rand"
 	"os"
 	"os/signal"
 	"strings"
@@ -421,8 +422,7 @@ func (n *ValidatorNode) performAntiEntropySync() {
 	}
 
 	// Pick a random peer for anti-entropy exchange
-	randomIndex := time.Now().UnixNano() % int64(len(peers))
-	selectedPeer := peers[randomIndex]
+	selectedPeer := peers[rand.Intn(len(peers))]
 
 	// Request state sync from the selected peer
 	n.requestStateSync(selectedPeer.ID)
