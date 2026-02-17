@@ -16,6 +16,10 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// maxRequestBodySize limits the size of incoming JSON request bodies (1 MB).
+// Prevents clients from sending excessively large payloads that waste memory.
+const maxRequestBodySize = 1 << 20
+
 // Server represents the API server
 type Server struct {
 	router     *mux.Router
@@ -173,6 +177,7 @@ func (s *Server) Start() error {
 // Handler functions
 
 func (s *Server) handleValidateTicket(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	var req ValidateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.sendError(w, http.StatusBadRequest, "Invalid request body")
@@ -200,6 +205,7 @@ func (s *Server) handleValidateTicket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleConsumeTicket(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	var req ConsumeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.sendError(w, http.StatusBadRequest, "Invalid request body")
@@ -227,6 +233,7 @@ func (s *Server) handleConsumeTicket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDisputeTicket(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	var req DisputeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.sendError(w, http.StatusBadRequest, "Invalid request body")
