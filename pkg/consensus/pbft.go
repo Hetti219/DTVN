@@ -473,34 +473,29 @@ func (n *PBFTNode) HandleCommit(msg *CommitMsg) error {
 	return nil
 }
 
-// checkPrepareQuorum checks if we have enough PREPARE messages
-func (n *PBFTNode) checkPrepareQuorum(sequence int64) bool {
-	prepares := n.prepareLog[sequence]
+// checkQuorum checks if the number of votes meets the 2f+1 quorum requirement.
+// phase is used for logging (e.g. "Prepare", "Commit").
+func (n *PBFTNode) checkQuorum(phase string, sequence int64, voteCount int) bool {
 	required := 2*n.f + 1
 	// Ensure at least 1 is required even for single node
 	if required < 1 {
 		required = 1
 	}
-	hasQuorum := len(prepares) >= required
+	hasQuorum := voteCount >= required
 	if hasQuorum {
-		fmt.Printf("PBFT: Prepare quorum reached for seq %d (%d/%d messages)\n", sequence, len(prepares), required)
+		fmt.Printf("PBFT: %s quorum reached for seq %d (%d/%d messages)\n", phase, sequence, voteCount, required)
 	}
 	return hasQuorum
 }
 
+// checkPrepareQuorum checks if we have enough PREPARE messages
+func (n *PBFTNode) checkPrepareQuorum(sequence int64) bool {
+	return n.checkQuorum("Prepare", sequence, len(n.prepareLog[sequence]))
+}
+
 // checkCommitQuorum checks if we have enough COMMIT messages
 func (n *PBFTNode) checkCommitQuorum(sequence int64) bool {
-	commits := n.commitLog[sequence]
-	required := 2*n.f + 1
-	// Ensure at least 1 is required even for single node
-	if required < 1 {
-		required = 1
-	}
-	hasQuorum := len(commits) >= required
-	if hasQuorum {
-		fmt.Printf("PBFT: Commit quorum reached for seq %d (%d/%d messages)\n", sequence, len(commits), required)
-	}
-	return hasQuorum
+	return n.checkQuorum("Commit", sequence, len(n.commitLog[sequence]))
 }
 
 // moveToCommitPhase moves to the commit phase
