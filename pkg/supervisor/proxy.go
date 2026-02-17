@@ -404,7 +404,7 @@ func (s *Server) seedNode(nodeID, seedURL string) seedResult {
 		req.Header.Set("X-API-Key", s.apiKey)
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return seedResult{NodeID: nodeID, Err: err}
