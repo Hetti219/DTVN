@@ -23,6 +23,10 @@ const (
 // checkpointInterval defines how many operations between checkpoints
 const checkpointInterval int64 = 10
 
+// broadcastTimeout is the timeout for PBFT message broadcasts.
+// Extracted as a constant to avoid repeated allocations and ensure consistency.
+const broadcastTimeout = 3 * time.Second
+
 // PBFTNode represents a PBFT consensus node
 type PBFTNode struct {
 	nodeID               string
@@ -297,7 +301,7 @@ func (n *PBFTNode) ProposeRequest(req *Request) error {
 
 	fmt.Printf("PBFT: Node %s broadcasting PRE-PREPARE for seq %d\n", n.nodeID, seq)
 	go func() {
-		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
+		ctx, cancel := context.WithTimeout(n.ctx, broadcastTimeout)
 		defer cancel()
 		if err := n.broadcaster.Broadcast(ctx, data); err != nil {
 			fmt.Printf("Failed to broadcast PRE-PREPARE: %v\n", err)
@@ -367,7 +371,7 @@ func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 
 	fmt.Printf("PBFT: Node %s broadcasting PREPARE for seq %d\n", n.nodeID, msg.Sequence)
 	go func() {
-		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
+		ctx, cancel := context.WithTimeout(n.ctx, broadcastTimeout)
 		defer cancel()
 		if err := n.broadcaster.Broadcast(ctx, data); err != nil {
 			fmt.Printf("Failed to broadcast PREPARE: %v\n", err)
@@ -533,7 +537,7 @@ func (n *PBFTNode) moveToCommitPhase(sequence int64, digest string) error {
 
 	fmt.Printf("PBFT: Node %s broadcasting COMMIT for seq %d\n", n.nodeID, sequence)
 	go func() {
-		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
+		ctx, cancel := context.WithTimeout(n.ctx, broadcastTimeout)
 		defer cancel()
 		if err := n.broadcaster.Broadcast(ctx, data); err != nil {
 			fmt.Printf("Failed to broadcast COMMIT: %v\n", err)
@@ -764,7 +768,7 @@ func (n *PBFTNode) initiateViewChange() {
 			fmt.Printf("Failed to wrap VIEW_CHANGE message: %v\n", err)
 		} else {
 			go func() {
-				ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
+				ctx, cancel := context.WithTimeout(n.ctx, broadcastTimeout)
 				defer cancel()
 				if err := n.broadcaster.Broadcast(ctx, data); err != nil {
 					fmt.Printf("Failed to broadcast VIEW_CHANGE: %v\n", err)
@@ -942,7 +946,7 @@ func (n *PBFTNode) createCheckpoint(sequence int64) {
 	}
 
 	go func() {
-		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
+		ctx, cancel := context.WithTimeout(n.ctx, broadcastTimeout)
 		defer cancel()
 		if err := n.broadcaster.Broadcast(ctx, data); err != nil {
 			fmt.Printf("Failed to broadcast CHECKPOINT: %v\n", err)
