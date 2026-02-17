@@ -520,7 +520,7 @@ func (sn *StateNotifier) Notify(ticketID string, newState TicketState) {
 // Helper functions
 
 func copyMetadata(metadata map[string]string) map[string]string {
-	copy := make(map[string]string)
+	copy := make(map[string]string, len(metadata))
 	for k, v := range metadata {
 		copy[k] = v
 	}
