@@ -1233,14 +1233,14 @@ func (n *ValidatorNode) loadTicketsFromStore() {
 		return
 	}
 
-	tickets := make([]*state.Ticket, 0, len(records))
-	for _, rec := range records {
+	tickets := make([]*state.Ticket, len(records))
+	for i, rec := range records {
 		vc := state.NewVectorClock(n.nodeID)
 		for k, v := range rec.VectorClock {
 			vc.Update(k, v)
 		}
 
-		tickets = append(tickets, &state.Ticket{
+		tickets[i] = &state.Ticket{
 			ID:          rec.ID,
 			State:       state.TicketState(rec.State),
 			Data:        rec.Data,
@@ -1248,7 +1248,7 @@ func (n *ValidatorNode) loadTicketsFromStore() {
 			Timestamp:   rec.Timestamp,
 			VectorClock: vc,
 			Metadata:    rec.Metadata,
-		})
+		}
 	}
 
 	if err := n.stateMachine.MergeState(tickets); err != nil {
