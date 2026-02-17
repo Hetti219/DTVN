@@ -124,7 +124,7 @@ func (vc *VectorClock) GetAll() map[string]uint64 {
 	vc.mu.RLock()
 	defer vc.mu.RUnlock()
 
-	clocks := make(map[string]uint64)
+	clocks := make(map[string]uint64, len(vc.clocks))
 	for k, v := range vc.clocks {
 		clocks[k] = v
 	}
