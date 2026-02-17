@@ -2,6 +2,7 @@ package gossip
 
 import (
 	"container/list"
+	"hash/fnv"
 	"sync"
 )
 
@@ -170,19 +171,25 @@ func (bf *BloomFilter) Contains(key string) bool {
 	return true
 }
 
-// getHashes generates multiple hash values for a key
+// getHashes generates multiple hash values for a key using FNV-1a.
+// Uses double hashing (h1 + i*h2) to derive k hashes from two base hashes,
+// which provides much better distribution than the previous hash*31 approach.
 func (bf *BloomFilter) getHashes(key string) []int {
-	hashes := make([]int, bf.hashCount)
+	// Primary hash: FNV-1a 64-bit
+	h := fnv.New64a()
+	h.Write([]byte(key))
+	sum := h.Sum64()
 
-	// Simple hash function (in production, use better hashing)
-	hash := 0
-	for i, c := range key {
-		hash = hash*31 + int(c) + i
+	// Split into two 32-bit hashes for double hashing
+	h1 := int(sum & 0xffffffff)
+	h2 := int(sum >> 32)
+	if h2 == 0 {
+		h2 = 1 // Avoid degenerate case
 	}
 
-	// Generate k different hashes
-	for i := 0; i < bf.hashCount; i++ {
-		hashes[i] = (hash + i*i) & 0x7fffffff // Keep positive
+	hashes := make([]int, bf.hashCount)
+	for i := range hashes {
+		hashes[i] = (h1 + i*h2) & 0x7fffffff // Keep positive
 	}
 
 	return hashes
