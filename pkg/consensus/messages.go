@@ -33,13 +33,28 @@ func DeserializeValidatorMessage(data []byte) (*pb.ValidatorMessage, error) {
 	return msg, nil
 }
 
+// operationToProto converts a string operation name to the protobuf TicketOperation enum.
+// Using a switch avoids a map lookup into pb.TicketOperation_value on every serialization.
+func operationToProto(op string) pb.TicketOperation {
+	switch op {
+	case "CONSUME":
+		return pb.TicketOperation_CONSUME
+	case "DISPUTE":
+		return pb.TicketOperation_DISPUTE
+	case "QUERY":
+		return pb.TicketOperation_QUERY
+	default:
+		return pb.TicketOperation_VALIDATE
+	}
+}
+
 // SerializePrePrepare serializes a PrePrepareMsg to protobuf format
 func SerializePrePrepare(msg *PrePrepareMsg) ([]byte, error) {
 	// Convert Request to protobuf Request
 	reqProto := &pb.Request{
 		RequestId:  msg.Request.RequestID,
 		TicketId:   msg.Request.TicketID,
-		Operation:  pb.TicketOperation(pb.TicketOperation_value[msg.Request.Operation]),
+		Operation:  operationToProto(msg.Request.Operation),
 		TicketData: msg.Request.Data,
 		Timestamp:  msg.Request.Timestamp,
 	}
@@ -164,11 +179,14 @@ func DeserializeCommit(data []byte) (*CommitMsg, error) {
 // SerializeRequest serializes a Request to protobuf format
 func SerializeRequest(req *Request) ([]byte, error) {
 	reqProto := &pb.Request{
-		RequestId:       req.RequestID,
-		TicketId:        req.TicketID,
-		Operation:       pb.TicketOperation(pb.TicketOperation_value[req.Operation]),
-		TicketData:      req.Data,
-		Timestamp:       req.Timestamp,
+		RequestId: req.RequestID,
+		TicketId:  req.TicketID,
+		Operation: operationToProto(req.Operation),
+		TicketData: req.Data,
+		Timestamp:  req.Timestamp,
+		// NodeID is stored in ClientSignature ([]byte) because the proto Request
+		// message has no dedicated node_id field. This is intentional — changing
+		// the proto schema would break the wire protocol for existing deployments.
 		ClientSignature: []byte(req.NodeID),
 	}
 
