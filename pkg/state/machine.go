@@ -124,17 +124,17 @@ func (sm *StateMachine) ValidateTicket(ticketID string, validatorID string, data
 		return fmt.Errorf("ticket %s not found — ticket must be issued before validation", ticketID)
 	}
 
-	// Only ISSUED tickets can be validated
-	if ticket.State == StateValidated {
+	// Only ISSUED tickets can be validated — use switch for clarity and efficiency
+	switch ticket.State {
+	case StateIssued:
+		// OK, proceed
+	case StateValidated:
 		return fmt.Errorf("ticket %s already validated", ticketID)
-	}
-	if ticket.State == StateConsumed {
+	case StateConsumed:
 		return fmt.Errorf("ticket %s already consumed", ticketID)
-	}
-	if ticket.State == StateDisputed {
+	case StateDisputed:
 		return fmt.Errorf("ticket %s is disputed", ticketID)
-	}
-	if ticket.State != StateIssued {
+	default:
 		return fmt.Errorf("ticket %s cannot be validated (current state: %s)", ticketID, ticket.State)
 	}
 
