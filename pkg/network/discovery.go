@@ -221,8 +221,11 @@ func (d *Discovery) Close() error {
 
 // connectToBootstrapPeers connects to the initial bootstrap peers
 func connectToBootstrapPeers(ctx context.Context, h host.Host, bootstrapPeers []peer.AddrInfo) error {
-	var wg sync.WaitGroup
-	errChan := make(chan error, len(bootstrapPeers))
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+	)
 
 	for _, peerInfo := range bootstrapPeers {
 		wg.Add(1)
@@ -243,7 +246,11 @@ func connectToBootstrapPeers(ctx context.Context, h host.Host, bootstrapPeers []
 
 			// Normal case: we have peer ID
 			if err := h.Connect(connectCtx, pi); err != nil {
-				errChan <- fmt.Errorf("failed to connect to bootstrap peer %s: %w", pi.ID, err)
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = fmt.Errorf("failed to connect to bootstrap peer %s: %w", pi.ID, err)
+				}
+				mu.Unlock()
 				return
 			}
 
@@ -252,12 +259,5 @@ func connectToBootstrapPeers(ctx context.Context, h host.Host, bootstrapPeers []
 	}
 
 	wg.Wait()
-	close(errChan)
-
-	// Return first error if any
-	for err := range errChan {
-		return err
-	}
-
-	return nil
+	return firstErr
 }
