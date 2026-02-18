@@ -309,10 +309,12 @@ func (m *NodeManager) startNodeProcess(node *ManagedNode, bootstrapAddr string) 
 
 // streamOutput streams output from a reader to the node's buffer
 func (m *NodeManager) streamOutput(node *ManagedNode, reader io.Reader, source string) {
+	// Pre-build the prefix once instead of allocating via fmt.Sprintf on every line.
+	prefix := "[" + source + "] "
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		line := scanner.Text()
-		node.outputBuf.Write(fmt.Sprintf("[%s] %s", source, line))
+		node.outputBuf.Write(prefix + line)
 
 		if m.outputCallback != nil {
 			m.outputCallback(node.ID, line)
