@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -597,6 +599,10 @@ func (n *PBFTNode) executeRequest(sequence int64) error {
 	// Reset view timer
 	n.viewTimer.Reset(n.viewTimeout)
 
+	// Request has been committed and executed — remove from log immediately.
+	// Checkpoint GC handles prepareLog/commitLog; requestLog can be pruned now.
+	delete(n.requestLog, sequence)
+
 	// Create checkpoint at interval to enable log garbage collection
 	if sequence%checkpointInterval == 0 {
 		n.createCheckpoint(sequence)
@@ -1133,9 +1139,17 @@ func (n *PBFTNode) Close() error {
 
 // Helper functions
 
-// computeDigest computes the digest of a request
+// computeDigest computes the digest of a request.
+// Uses strings.Builder to avoid the intermediate allocation of fmt.Sprintf.
 func (n *PBFTNode) computeDigest(req *Request) string {
-	data := fmt.Sprintf("%s:%s:%s:%d", req.RequestID, req.TicketID, req.Operation, req.Timestamp)
-	hash := sha256.Sum256([]byte(data))
+	var b strings.Builder
+	b.WriteString(req.RequestID)
+	b.WriteByte(':')
+	b.WriteString(req.TicketID)
+	b.WriteByte(':')
+	b.WriteString(req.Operation)
+	b.WriteByte(':')
+	b.WriteString(strconv.FormatInt(req.Timestamp, 10))
+	hash := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(hash[:])
 }
