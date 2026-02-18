@@ -16,18 +16,22 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// maxRequestBodySize limits the size of incoming JSON request bodies (1 MB).
+// Prevents clients from sending excessively large payloads that waste memory.
+const maxRequestBodySize = 1 << 20
+
 // Server represents the API server
 type Server struct {
-	router      *mux.Router
-	httpServer  *http.Server
-	validator   ValidatorInterface
-	wsClients   map[*websocket.Conn]bool
-	wsUpgrader  websocket.Upgrader
-	wsMu        sync.RWMutex
-	broadcast   chan interface{}
-	ctx         context.Context
-	cancel      context.CancelFunc
-	apiKey      string
+	router     *mux.Router
+	httpServer *http.Server
+	validator  ValidatorInterface
+	wsClients  map[*websocket.Conn]bool
+	wsUpgrader websocket.Upgrader
+	wsMu       sync.RWMutex
+	broadcast  chan interface{}
+	ctx        context.Context
+	cancel     context.CancelFunc
+	apiKey     string
 }
 
 // ValidatorInterface defines the interface for validator operations
@@ -173,6 +177,7 @@ func (s *Server) Start() error {
 // Handler functions
 
 func (s *Server) handleValidateTicket(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	var req ValidateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.sendError(w, http.StatusBadRequest, "Invalid request body")
@@ -200,6 +205,7 @@ func (s *Server) handleValidateTicket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleConsumeTicket(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	var req ConsumeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.sendError(w, http.StatusBadRequest, "Invalid request body")
@@ -227,6 +233,7 @@ func (s *Server) handleConsumeTicket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleDisputeTicket(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
 	var req DisputeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.sendError(w, http.StatusBadRequest, "Invalid request body")
@@ -294,8 +301,8 @@ func (s *Server) handleGetAllTickets(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	status := map[string]interface{}{
-		"status":    "running",
-		"timestamp": time.Now().Unix(),
+		"status":     "running",
+		"timestamp":  time.Now().Unix(),
 		"ws_clients": len(s.wsClients),
 	}
 
@@ -371,20 +378,26 @@ func (s *Server) broadcastLoop() {
 		case <-s.ctx.Done():
 			return
 		case msg := <-s.broadcast:
+			// Snapshot client list under lock, then release before doing I/O.
+			// This avoids holding the lock during potentially slow WriteJSON calls,
+			// and eliminates the unsafe RUnlock→Lock→Unlock→RLock juggling mid-iteration.
 			s.wsMu.RLock()
+			clients := make([]*websocket.Conn, 0, len(s.wsClients))
 			for client := range s.wsClients {
-				err := client.WriteJSON(msg)
-				if err != nil {
+				clients = append(clients, client)
+			}
+			s.wsMu.RUnlock()
+
+			// Write to each client without holding any lock
+			for _, client := range clients {
+				if err := client.WriteJSON(msg); err != nil {
 					fmt.Printf("WebSocket write error: %v\n", err)
 					client.Close()
-					s.wsMu.RUnlock()
 					s.wsMu.Lock()
 					delete(s.wsClients, client)
 					s.wsMu.Unlock()
-					s.wsMu.RLock()
 				}
 			}
-			s.wsMu.RUnlock()
 		}
 	}
 }
@@ -415,9 +428,7 @@ func (s *Server) corsMiddleware(next http.Handler) http.Handler {
 }
 
 // checkWSOrigin validates WebSocket connection origins to prevent cross-site
-// WebSocket hijacking. Allows same-origin, localhost, and origins listed in
-// the DTVN_WS_ORIGINS environment variable (comma-separated).
-// Requests without an Origin header (non-browser clients) are always allowed.
+// WebSocket hijacking. It allows same-origin requests, localhost for development, and any additional origins specified
 func checkWSOrigin(r *http.Request) bool {
 	origin := r.Header.Get("Origin")
 	if origin == "" {
@@ -454,7 +465,6 @@ func checkWSOrigin(r *http.Request) bool {
 }
 
 // apiKeyMiddleware enforces API key authentication when an API key is configured.
-// Exempt paths: /health, /ws, and static files (non-/api/ paths).
 func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path

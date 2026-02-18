@@ -25,7 +25,7 @@ func TestSingleTicketValidation(t *testing.T) {
 	}
 
 	cfg := integration.DefaultTestConfig()
-	cfg.NumNodes = 4 // Use smaller cluster for faster consensus (2f+1 = 3 nodes needed)
+	cfg.NumNodes = 4                         // Use smaller cluster for faster consensus (2f+1 = 3 nodes needed)
 	cfg.ConsensusWaitTime = 15 * time.Second // More time for PBFT consensus to complete
 
 	// Create cluster

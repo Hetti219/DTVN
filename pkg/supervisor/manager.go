@@ -309,10 +309,12 @@ func (m *NodeManager) startNodeProcess(node *ManagedNode, bootstrapAddr string) 
 
 // streamOutput streams output from a reader to the node's buffer
 func (m *NodeManager) streamOutput(node *ManagedNode, reader io.Reader, source string) {
+	// Pre-build the prefix once instead of allocating via fmt.Sprintf on every line.
+	prefix := "[" + source + "] "
 	scanner := bufio.NewScanner(reader)
 	for scanner.Scan() {
 		line := scanner.Text()
-		node.outputBuf.Write(fmt.Sprintf("[%s] %s", source, line))
+		node.outputBuf.Write(prefix + line)
 
 		if m.outputCallback != nil {
 			m.outputCallback(node.ID, line)
@@ -430,6 +432,27 @@ func (m *NodeManager) GetAllNodes() []*ManagedNode {
 	}
 
 	return nodes
+}
+
+// UpdatePrimaryStatus updates a node's primary flag and returns true if it changed.
+func (m *NodeManager) UpdatePrimaryStatus(nodeID string, isPrimary bool) bool {
+	m.mu.RLock()
+	node, ok := m.nodes[nodeID]
+	m.mu.RUnlock()
+
+	if !ok {
+		return false
+	}
+
+	node.mu.Lock()
+	defer node.mu.Unlock()
+
+	if node.IsPrimary == isPrimary {
+		return false
+	}
+
+	node.IsPrimary = isPrimary
+	return true
 }
 
 // GetNodeLogs returns the output buffer for a node

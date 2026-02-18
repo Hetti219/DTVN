@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -113,7 +114,7 @@ var (
 	StorageLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "storage_latency_seconds",
-			Help: "Storage operation latency in seconds",
+			Help:    "Storage operation latency in seconds",
 			Buckets: prometheus.DefBuckets,
 		},
 		[]string{"operation"},
@@ -143,9 +144,11 @@ var (
 	})
 )
 
-// RegisterMetrics registers all metrics with Prometheus
+// RegisterMetrics registers all metrics with Prometheus.
+// Uses Register instead of MustRegister so that calling this function more than
+// once (e.g. in tests) does not panic on AlreadyRegisteredError.
 func RegisterMetrics() {
-	prometheus.MustRegister(
+	collectors := []prometheus.Collector{
 		// Consensus
 		ConsensusRoundsTotal,
 		ConsensusSuccessTotal,
@@ -174,7 +177,14 @@ func RegisterMetrics() {
 		APIRequests,
 		APILatency,
 		WebSocketConnections,
-	)
+	}
+	for _, c := range collectors {
+		if err := prometheus.Register(c); err != nil {
+			if _, ok := err.(prometheus.AlreadyRegisteredError); !ok {
+				fmt.Printf("metrics: failed to register collector: %v\n", err)
+			}
+		}
+	}
 }
 
 // Handler returns the Prometheus HTTP handler

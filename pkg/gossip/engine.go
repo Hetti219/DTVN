@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +23,13 @@ const (
 	MessageCacheSize = 10000
 	// BloomFilterFPRate is the false positive rate for bloom filters
 	BloomFilterFPRate = 0.01
+	// SentMessagesTTL is how long sent message IDs are retained before cleanup
+	SentMessagesTTL = 10 * time.Minute
+	// SentMessagesCleanupInterval is how often old sent message entries are evicted
+	SentMessagesCleanupInterval = 2 * time.Minute
+	// SentMessagesMaxSize is the hard cap on sent messages map entries.
+	// If the map exceeds this after a cleanup pass, the oldest entries are evicted.
+	SentMessagesMaxSize = 50000
 )
 
 // Message represents a gossip message
@@ -44,8 +52,8 @@ type GossipEngine struct {
 	cancel          context.CancelFunc
 	mu              sync.RWMutex
 	handlers        []MessageHandler
-	sentMessages    map[string]bool
-	receivedDigests map[string]time.Time
+	sentMessages    map[string]time.Time // msgID -> insertion time (bounded with periodic cleanup)
+	receivedDigests map[string]time.Time // digest -> insertion time (bounded with periodic cleanup)
 }
 
 // MessageHandler is called when a new message is received
@@ -83,7 +91,7 @@ func NewGossipEngine(ctx context.Context, cfg *Config, peerMgr PeerManager) (*Go
 		ctx:             engineCtx,
 		cancel:          cancel,
 		handlers:        make([]MessageHandler, 0),
-		sentMessages:    make(map[string]bool),
+		sentMessages:    make(map[string]time.Time),
 		receivedDigests: make(map[string]time.Time),
 	}
 
@@ -100,6 +108,9 @@ func (g *GossipEngine) Start() {
 
 	// Start fanout adjuster
 	go g.adjustFanout()
+
+	// Start periodic cleanup of bounded maps
+	go g.cleanupLoop()
 }
 
 // Publish publishes a new message to the network
@@ -117,7 +128,7 @@ func (g *GossipEngine) Publish(payload []byte) error {
 
 	// Add to sent messages
 	g.mu.Lock()
-	g.sentMessages[msg.ID] = true
+	g.sentMessages[msg.ID] = time.Now()
 	g.mu.Unlock()
 
 	// Send to message channel
@@ -248,8 +259,8 @@ func (g *GossipEngine) performAntiEntropy() {
 	// Get message digests from cache
 	digests := g.cache.GetDigests()
 
-	// Exchange digests (simplified - in production use proper protocol)
-	// For now, just request missing messages from the peer
+	// Exchange digests
+	// request missing messages from the peer
 	ctx, cancel := context.WithTimeout(g.ctx, 10*time.Second)
 	defer cancel()
 
@@ -288,6 +299,76 @@ func (g *GossipEngine) adjustFanout() {
 	}
 }
 
+// cleanupLoop periodically evicts expired entries from sentMessages and receivedDigests
+// to prevent unbounded memory growth.
+func (g *GossipEngine) cleanupLoop() {
+	ticker := time.NewTicker(SentMessagesCleanupInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-g.ctx.Done():
+			return
+		case <-ticker.C:
+			g.cleanupExpiredEntries()
+		}
+	}
+}
+
+// cleanupExpiredEntries removes entries older than SentMessagesTTL from both maps.
+// If a map still exceeds SentMessagesMaxSize after TTL eviction, the oldest entries
+// are dropped until the map is within bounds.
+func (g *GossipEngine) cleanupExpiredEntries() {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	cutoff := time.Now().Add(-SentMessagesTTL)
+
+	// Evict expired sentMessages
+	for id, ts := range g.sentMessages {
+		if ts.Before(cutoff) {
+			delete(g.sentMessages, id)
+		}
+	}
+
+	// Hard cap: if still over limit, drop oldest entries
+	if len(g.sentMessages) > SentMessagesMaxSize {
+		// Find the oldest entries to remove
+		excess := len(g.sentMessages) - SentMessagesMaxSize
+		type entry struct {
+			id string
+			ts time.Time
+		}
+		oldest := make([]entry, 0, excess)
+		for id, ts := range g.sentMessages {
+			if len(oldest) < excess {
+				oldest = append(oldest, entry{id, ts})
+			} else {
+				// Replace the newest in oldest[] if this entry is older
+				maxIdx := 0
+				for i := 1; i < len(oldest); i++ {
+					if oldest[i].ts.After(oldest[maxIdx].ts) {
+						maxIdx = i
+					}
+				}
+				if ts.Before(oldest[maxIdx].ts) {
+					oldest[maxIdx] = entry{id, ts}
+				}
+			}
+		}
+		for _, e := range oldest {
+			delete(g.sentMessages, e.id)
+		}
+	}
+
+	// Evict expired receivedDigests
+	for id, ts := range g.receivedDigests {
+		if ts.Before(cutoff) {
+			delete(g.receivedDigests, id)
+		}
+	}
+}
+
 // GetCacheSize returns the current cache size
 func (g *GossipEngine) GetCacheSize() int {
 	return g.cache.Size()
@@ -307,18 +388,21 @@ func generateMessageID(payload []byte) string {
 	return hex.EncodeToString(hash[:])
 }
 
-// selectRandomPeers selects n random peers from the list
+// selectRandomPeers selects n random peers from the list using a partial
+// Fisher-Yates shuffle. Only shuffles n positions instead of the full slice,
+// reducing work from O(len(peers)) to O(n).
 func selectRandomPeers(peers []peer.ID, n int) []peer.ID {
 	if n >= len(peers) {
 		return peers
 	}
 
-	// Fisher-Yates shuffle
+	// Copy to avoid mutating the caller's slice
 	shuffled := make([]peer.ID, len(peers))
 	copy(shuffled, peers)
 
-	for i := len(shuffled) - 1; i > 0; i-- {
-		j := rand.Intn(i + 1)
+	// Partial Fisher-Yates: only shuffle the first n positions
+	for i := 0; i < n; i++ {
+		j := i + rand.Intn(len(shuffled)-i)
 		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 	}
 
@@ -335,9 +419,5 @@ func serializeMessage(msg *Message) []byte {
 // serializeDigests serializes message digests (simplified)
 func serializeDigests(digests []string) []byte {
 	// In production, use protobuf
-	result := ""
-	for _, d := range digests {
-		result += d + ","
-	}
-	return []byte(result)
+	return []byte(strings.Join(digests, ","))
 }

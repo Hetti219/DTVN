@@ -205,14 +205,14 @@ func TestCompare(t *testing.T) {
 
 	t.Run("CompareComplexConcurrent", func(t *testing.T) {
 		vc1 := NewVectorClock("node1")
-		vc1.Increment()           // node1: 1
-		vc1.Update("node2", 5)    // node2: 5
-		vc1.Update("node3", 2)    // node3: 2
+		vc1.Increment()        // node1: 1
+		vc1.Update("node2", 5) // node2: 5
+		vc1.Update("node3", 2) // node3: 2
 
 		vc2 := NewVectorClock("node2")
-		vc2.Update("node1", 0)    // node1: 0
-		vc2.Update("node2", 7)    // node2: 7
-		vc2.Update("node3", 1)    // node3: 1
+		vc2.Update("node1", 0) // node1: 0
+		vc2.Update("node2", 7) // node2: 7
+		vc2.Update("node3", 1) // node3: 1
 
 		// vc1 has node1:1 > 0, node3:2 > 1
 		// vc2 has node2:7 > 5

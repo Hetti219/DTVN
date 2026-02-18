@@ -2,10 +2,12 @@ package supervisor
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -58,6 +60,22 @@ func (s *Server) getRunningNodeURL() (string, error) {
 func (s *Server) getPrimaryNodeURL() (string, error) {
 	nodes := s.nodeManager.GetAllNodes()
 
+	// Phase 1: Dynamic discovery — query running nodes to find who is
+	// actually the PBFT primary. This reflects view changes at the consensus
+	// layer (e.g., after the original primary went down and a new one was elected).
+	for _, node := range nodes {
+		if node.Status != NodeStatusRunning {
+			continue
+		}
+		url := fmt.Sprintf("http://127.0.0.1:%d", node.APIPort)
+		if isPrimary, err := s.checkNodeIsPrimary(url); err == nil && isPrimary {
+			return url, nil
+		}
+	}
+
+	// Phase 2: Fall back to static IsPrimary flag from cluster startup.
+	// This handles the case where nodes haven't fully started their API servers
+	// yet but were configured as primary during cluster creation.
 	hasPrimary := false
 	for _, node := range nodes {
 		if node.IsPrimary {
@@ -79,15 +97,56 @@ func (s *Server) getPrimaryNodeURL() (string, error) {
 	return "", fmt.Errorf("no running nodes available")
 }
 
-// isNodeReachable checks if a node's API server is actually listening
+// isNodeReachable checks if a node's API server is actually listening.
+// Uses context timeout with the shared client to avoid creating new clients.
 func (s *Server) isNodeReachable(baseURL string) bool {
-	client := &http.Client{Timeout: 500 * time.Millisecond}
-	resp, err := client.Get(baseURL + "/health")
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/health", nil)
+	if err != nil {
+		return false
+	}
+	resp, err := s.proxyClient.Do(req)
 	if err != nil {
 		return false
 	}
 	resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
+}
+
+// checkNodeIsPrimary queries a node's stats endpoint to determine if it
+// considers itself the PBFT primary. This reflects live consensus state
+// including view changes that happen after cluster startup.
+func (s *Server) checkNodeIsPrimary(baseURL string) (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/api/v1/stats", nil)
+	if err != nil {
+		return false, err
+	}
+	if s.apiKey != "" {
+		req.Header.Set("X-API-Key", s.apiKey)
+	}
+	resp, err := s.proxyClient.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("stats returned %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Data struct {
+			IsPrimary bool `json:"is_primary"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return false, err
+	}
+
+	return result.Data.IsPrimary, nil
 }
 
 // proxyRequest forwards a request to a running validator node
@@ -100,9 +159,10 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, endpoint s
 
 	targetURL := fmt.Sprintf("%s/api/v1%s", nodeURL, endpoint)
 
-	// Create new request
+	// Read body with size limit (1MB)
 	var body io.Reader
 	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
 			s.writeError(w, http.StatusInternalServerError, "Failed to read request body")
@@ -120,9 +180,8 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, endpoint s
 	// Copy headers
 	proxyReq.Header = r.Header.Clone()
 
-	// Make request
-	client := &http.Client{}
-	resp, err := client.Do(proxyReq)
+	// Make request using shared client
+	resp, err := s.proxyClient.Do(proxyReq)
 	if err != nil {
 		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to connect to validator node: %v", err))
 		return
@@ -156,8 +215,10 @@ func (s *Server) proxyRequestToPrimary(w http.ResponseWriter, r *http.Request, e
 
 	targetURL := fmt.Sprintf("%s/api/v1%s", nodeURL, endpoint)
 
+	// Read body with size limit (1MB)
 	var body io.Reader
 	if r.Body != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
 			s.writeError(w, http.StatusInternalServerError, "Failed to read request body")
@@ -174,8 +235,7 @@ func (s *Server) proxyRequestToPrimary(w http.ResponseWriter, r *http.Request, e
 
 	proxyReq.Header = r.Header.Clone()
 
-	client := &http.Client{}
-	resp, err := client.Do(proxyReq)
+	resp, err := s.proxyClient.Do(proxyReq)
 	if err != nil {
 		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to connect to validator node: %v", err))
 		return
@@ -201,7 +261,8 @@ func (s *Server) proxyTicketRequest(w http.ResponseWriter, r *http.Request, endp
 		return
 	}
 
-	// Read body to extract ticket_id for the WebSocket event
+	// Read body with size limit to extract ticket_id for the WebSocket event
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		s.writeError(w, http.StatusBadRequest, "Failed to read request body")
@@ -213,7 +274,7 @@ func (s *Server) proxyTicketRequest(w http.ResponseWriter, r *http.Request, endp
 	}
 	json.Unmarshal(bodyBytes, &reqBody)
 
-	// Proxy the request
+	// Proxy the request using shared client (reuses TCP connections)
 	targetURL := fmt.Sprintf("%s/api/v1%s", nodeURL, endpoint)
 	proxyReq, err := http.NewRequest(r.Method, targetURL, bytes.NewReader(bodyBytes))
 	if err != nil {
@@ -222,8 +283,7 @@ func (s *Server) proxyTicketRequest(w http.ResponseWriter, r *http.Request, endp
 	}
 	proxyReq.Header = r.Header.Clone()
 
-	client := &http.Client{}
-	resp, err := client.Do(proxyReq)
+	resp, err := s.proxyClient.Do(proxyReq)
 	if err != nil {
 		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to connect to validator node: %v", err))
 		return
@@ -251,56 +311,74 @@ func (s *Server) proxyTicketRequest(w http.ResponseWriter, r *http.Request, endp
 	}
 }
 
+// seedResult holds the result of seeding a single node.
+type seedResult struct {
+	NodeID string
+	Seeded int
+	Err    error
+}
+
 // handleProxySeedTickets seeds tickets on ALL running nodes (not just primary).
-// Seeding is a local operation — each node loads the same deterministic data independently.
+// Seeding is a local operation — each node loads the same deterministic data
+// independently, so requests are sent in parallel for faster completion.
 func (s *Server) handleProxySeedTickets(w http.ResponseWriter, r *http.Request) {
 	nodes := s.nodeManager.GetAllNodes()
 
-	var seededTotal int
-	var nodeResults []map[string]interface{}
-	var lastErr error
-
+	// Collect reachable nodes first
+	type targetNode struct {
+		id      string
+		seedURL string
+	}
+	var targets []targetNode
 	for _, node := range nodes {
 		if node.Status != NodeStatusRunning {
 			continue
 		}
-
 		nodeBaseURL := fmt.Sprintf("http://127.0.0.1:%d", node.APIPort)
 		if !s.isNodeReachable(nodeBaseURL) {
 			continue
 		}
+		targets = append(targets, targetNode{
+			id:      node.ID,
+			seedURL: fmt.Sprintf("%s/api/v1/tickets/seed", nodeBaseURL),
+		})
+	}
 
-		seedURL := fmt.Sprintf("%s/api/v1/tickets/seed", nodeBaseURL)
-		req, err := http.NewRequest("POST", seedURL, nil)
-		if err != nil {
-			lastErr = err
+	if len(targets) == 0 {
+		s.writeError(w, http.StatusServiceUnavailable, "No running nodes available. Start a cluster first.")
+		return
+	}
+
+	// Seed all nodes in parallel with concurrency limit of 10
+	results := make([]seedResult, len(targets))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 10)
+
+	for i, target := range targets {
+		wg.Add(1)
+		go func(idx int, t targetNode) {
+			defer wg.Done()
+			sem <- struct{}{}
+			results[idx] = s.seedNode(t.id, t.seedURL)
+			<-sem
+		}(i, target)
+	}
+	wg.Wait()
+
+	// Aggregate results
+	var seededTotal int
+	var nodeResults []map[string]interface{}
+	var lastErr error
+
+	for _, res := range results {
+		if res.Err != nil {
+			lastErr = res.Err
 			continue
 		}
-		if s.apiKey != "" {
-			req.Header.Set("X-API-Key", s.apiKey)
-		}
-
-		client := &http.Client{Timeout: 10 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			lastErr = err
-			continue
-		}
-
-		var result map[string]interface{}
-		json.NewDecoder(resp.Body).Decode(&result)
-		resp.Body.Close()
-
-		seeded := 0
-		if data, ok := result["data"].(map[string]interface{}); ok {
-			if val, ok := data["seeded"].(float64); ok {
-				seeded = int(val)
-			}
-		}
-		seededTotal += seeded
+		seededTotal += res.Seeded
 		nodeResults = append(nodeResults, map[string]interface{}{
-			"node_id": node.ID,
-			"seeded":  seeded,
+			"node_id": res.NodeID,
+			"seeded":  res.Seeded,
 		})
 	}
 
@@ -328,6 +406,37 @@ func (s *Server) handleProxySeedTickets(w http.ResponseWriter, r *http.Request) 
 			"nodes":        nodeResults,
 		},
 	})
+}
+
+// seedNode sends a seed request to a single node and returns the result.
+// Uses a per-request context timeout with the shared client for connection reuse.
+func (s *Server) seedNode(nodeID, seedURL string) seedResult {
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "POST", seedURL, nil)
+	if err != nil {
+		return seedResult{NodeID: nodeID, Err: err}
+	}
+	if s.apiKey != "" {
+		req.Header.Set("X-API-Key", s.apiKey)
+	}
+
+	resp, err := s.proxyClient.Do(req)
+	if err != nil {
+		return seedResult{NodeID: nodeID, Err: err}
+	}
+	defer resp.Body.Close()
+
+	var result map[string]interface{}
+	json.NewDecoder(resp.Body).Decode(&result)
+
+	seeded := 0
+	if data, ok := result["data"].(map[string]interface{}); ok {
+		if val, ok := data["seeded"].(float64); ok {
+			seeded = int(val)
+		}
+	}
+	return seedResult{NodeID: nodeID, Seeded: seeded}
 }
 
 // handleProxyValidateTicketViaNode routes a validation request to a specific node
@@ -388,8 +497,7 @@ func (s *Server) handleProxyValidateTicketViaNode(w http.ResponseWriter, r *http
 		proxyReq.Header.Set("X-API-Key", s.apiKey)
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(proxyReq)
+	resp, err := s.proxyClient.Do(proxyReq)
 	if err != nil {
 		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to connect to node %s: %v", reqBody.NodeID, err))
 		return
@@ -470,7 +578,7 @@ func (s *Server) handleProxyGetStats(w http.ResponseWriter, r *http.Request) {
 	if s.apiKey != "" {
 		statsReq.Header.Set("X-API-Key", s.apiKey)
 	}
-	resp, err := (&http.Client{}).Do(statsReq)
+	resp, err := s.proxyClient.Do(statsReq)
 	if err != nil {
 		s.writeError(w, http.StatusBadGateway, "Failed to get stats from node")
 		return

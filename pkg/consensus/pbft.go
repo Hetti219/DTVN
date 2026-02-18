@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -20,27 +22,42 @@ const (
 	StateCommitted  State = "COMMITTED"
 )
 
+// checkpointInterval defines how many operations between checkpoints
+const checkpointInterval int64 = 10
+
+// broadcastTimeout is the timeout for PBFT message broadcasts.
+// Extracted as a constant to avoid repeated allocations and ensure consistency.
+const broadcastTimeout = 3 * time.Second
+
 // PBFTNode represents a PBFT consensus node
 type PBFTNode struct {
-	nodeID       string
-	view         int64
-	sequence     int64
-	state        State
-	f            int // Maximum number of Byzantine nodes tolerated
-	totalNodes   int
-	isPrimary    bool
-	prepareLog   map[int64]map[string]*PrepareMsg
-	commitLog    map[int64]map[string]*CommitMsg
-	requestLog   map[int64]*Request
-	messageQueue chan ConsensusMessage
-	viewTimer    *time.Timer
-	viewTimeout  time.Duration // Configurable view timeout for consensus
-	ctx          context.Context
-	cancel       context.CancelFunc
-	mu           sync.RWMutex
-	handlers     []ConsensusHandler
-	broadcaster  MessageBroadcaster
-	checkpoints  map[int64]*Checkpoint
+	nodeID               string
+	view                 int64
+	sequence             int64
+	state                State
+	f                    int // Maximum number of Byzantine nodes tolerated
+	totalNodes           int
+	isPrimary            bool
+	prepareLog           map[int64]map[string]*PrepareMsg
+	commitLog            map[int64]map[string]*CommitMsg
+	requestLog           map[int64]*Request
+	messageQueue         chan ConsensusMessage
+	viewTimer            *time.Timer
+	viewTimeout          time.Duration // Configurable view timeout for consensus
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	mu                   sync.RWMutex
+	handlers             []ConsensusHandler
+	broadcaster          MessageBroadcaster
+	checkpoints          map[int64]*Checkpoint
+	checkpointVotes      map[int64]map[string]*Checkpoint
+	lastStableCheckpoint int64
+	viewChangeLog        map[int64]map[string]*ViewChangeMsg
+
+	// Tracks whether this non-primary node has a pending client request
+	// that the primary hasn't started consensus for. Enables view change
+	// from IDLE state when the primary appears to be dead.
+	hasPendingClientRequest bool
 
 	// Callback mechanism for synchronous consensus waiting
 	// Maps request ID to callback function
@@ -124,6 +141,12 @@ type Checkpoint struct {
 	Timestamp   int64
 }
 
+// ViewChangeMsg represents a VIEW_CHANGE message
+type ViewChangeMsg struct {
+	NewView int64
+	NodeID  string
+}
+
 // ConsensusMessage is the interface for all consensus messages
 type ConsensusMessage interface {
 	GetView() int64
@@ -167,9 +190,7 @@ func NewPBFTNode(ctx context.Context, cfg *Config, broadcaster MessageBroadcaste
 
 	viewTimeout := cfg.ViewTimeout
 	if viewTimeout == 0 {
-		// Default to 15 seconds to allow sufficient time for PBFT three-phase commit
-		// across network latency. 5 seconds was too aggressive and caused premature
-		// view changes before PREPARE votes could be collected.
+		// Default to 15 seconds to allow sufficient time for PBFT three-phase commit across network latency.
 		viewTimeout = 15 * time.Second
 	}
 
@@ -192,6 +213,8 @@ func NewPBFTNode(ctx context.Context, cfg *Config, broadcaster MessageBroadcaste
 		handlers:         make([]ConsensusHandler, 0),
 		broadcaster:      broadcaster,
 		checkpoints:      make(map[int64]*Checkpoint),
+		checkpointVotes:  make(map[int64]map[string]*Checkpoint),
+		viewChangeLog:    make(map[int64]map[string]*ViewChangeMsg),
 		requestCallbacks: make(map[string]ConsensusCallback),
 	}
 
@@ -280,7 +303,7 @@ func (n *PBFTNode) ProposeRequest(req *Request) error {
 
 	fmt.Printf("PBFT: Node %s broadcasting PRE-PREPARE for seq %d\n", n.nodeID, seq)
 	go func() {
-		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
+		ctx, cancel := context.WithTimeout(n.ctx, broadcastTimeout)
 		defer cancel()
 		if err := n.broadcaster.Broadcast(ctx, data); err != nil {
 			fmt.Printf("Failed to broadcast PRE-PREPARE: %v\n", err)
@@ -311,13 +334,10 @@ func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 	}
 
 	// Store request - this makes the request available for consensus execution.
-	// PREPAREs or COMMITs may have arrived before this PRE-PREPARE due to
-	// network reordering; they are stored but not acted upon until now.
+
 	n.requestLog[msg.Sequence] = msg.Request
 
-	// Reset view timer for this new consensus round. Without this, a node
-	// that has been idle may have a nearly-expired timer, causing a premature
-	// view change before consensus can complete.
+	// Reset view timer for this new consensus round.
 	n.viewTimer.Reset(n.viewTimeout)
 
 	// Update state
@@ -353,7 +373,7 @@ func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 
 	fmt.Printf("PBFT: Node %s broadcasting PREPARE for seq %d\n", n.nodeID, msg.Sequence)
 	go func() {
-		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
+		ctx, cancel := context.WithTimeout(n.ctx, broadcastTimeout)
 		defer cancel()
 		if err := n.broadcaster.Broadcast(ctx, data); err != nil {
 			fmt.Printf("Failed to broadcast PREPARE: %v\n", err)
@@ -366,9 +386,7 @@ func (n *PBFTNode) handlePrePrepare(msg *PrePrepareMsg) error {
 		return n.moveToCommitPhase(msg.Sequence, msg.Digest)
 	}
 
-	// Also check if COMMITs arrived early (before PRE-PREPARE) and we already
-	// have commit quorum. This handles extreme reordering where the entire
-	// PREPARE+COMMIT exchange completed before PRE-PREPARE was processed.
+	// Also check if COMMITs arrived early (before PRE-PREPARE) and we already have commit quorum.
 	if n.checkCommitQuorum(msg.Sequence) {
 		return n.executeRequest(msg.Sequence)
 	}
@@ -447,9 +465,6 @@ func (n *PBFTNode) HandleCommit(msg *CommitMsg) error {
 	// Check if we have quorum (2f+1 COMMIT messages)
 	if n.checkCommitQuorum(msg.Sequence) {
 		// Only execute if PRE-PREPARE has been processed (request exists).
-		// If COMMITs arrive before PRE-PREPARE due to network reordering,
-		// we store them and executeRequest will be called from
-		// handlePrePrepare → moveToCommitPhase once the request is available.
 		if _, hasRequest := n.requestLog[msg.Sequence]; hasRequest {
 			return n.executeRequest(msg.Sequence)
 		}
@@ -460,34 +475,29 @@ func (n *PBFTNode) HandleCommit(msg *CommitMsg) error {
 	return nil
 }
 
-// checkPrepareQuorum checks if we have enough PREPARE messages
-func (n *PBFTNode) checkPrepareQuorum(sequence int64) bool {
-	prepares := n.prepareLog[sequence]
+// checkQuorum checks if the number of votes meets the 2f+1 quorum requirement.
+// phase is used for logging (e.g. "Prepare", "Commit").
+func (n *PBFTNode) checkQuorum(phase string, sequence int64, voteCount int) bool {
 	required := 2*n.f + 1
 	// Ensure at least 1 is required even for single node
 	if required < 1 {
 		required = 1
 	}
-	hasQuorum := len(prepares) >= required
+	hasQuorum := voteCount >= required
 	if hasQuorum {
-		fmt.Printf("PBFT: Prepare quorum reached for seq %d (%d/%d messages)\n", sequence, len(prepares), required)
+		fmt.Printf("PBFT: %s quorum reached for seq %d (%d/%d messages)\n", phase, sequence, voteCount, required)
 	}
 	return hasQuorum
 }
 
+// checkPrepareQuorum checks if we have enough PREPARE messages
+func (n *PBFTNode) checkPrepareQuorum(sequence int64) bool {
+	return n.checkQuorum("Prepare", sequence, len(n.prepareLog[sequence]))
+}
+
 // checkCommitQuorum checks if we have enough COMMIT messages
 func (n *PBFTNode) checkCommitQuorum(sequence int64) bool {
-	commits := n.commitLog[sequence]
-	required := 2*n.f + 1
-	// Ensure at least 1 is required even for single node
-	if required < 1 {
-		required = 1
-	}
-	hasQuorum := len(commits) >= required
-	if hasQuorum {
-		fmt.Printf("PBFT: Commit quorum reached for seq %d (%d/%d messages)\n", sequence, len(commits), required)
-	}
-	return hasQuorum
+	return n.checkQuorum("Commit", sequence, len(n.commitLog[sequence]))
 }
 
 // moveToCommitPhase moves to the commit phase
@@ -524,7 +534,7 @@ func (n *PBFTNode) moveToCommitPhase(sequence int64, digest string) error {
 
 	fmt.Printf("PBFT: Node %s broadcasting COMMIT for seq %d\n", n.nodeID, sequence)
 	go func() {
-		ctx, cancel := context.WithTimeout(n.ctx, 3*time.Second)
+		ctx, cancel := context.WithTimeout(n.ctx, broadcastTimeout)
 		defer cancel()
 		if err := n.broadcaster.Broadcast(ctx, data); err != nil {
 			fmt.Printf("Failed to broadcast COMMIT: %v\n", err)
@@ -570,12 +580,9 @@ func (n *PBFTNode) executeRequest(sequence int64) error {
 	fmt.Printf("PBFT: ✅ Request executed successfully for ticket %s\n", req.TicketID)
 
 	// Call state replicator to ensure reliable state propagation to all peers
-	// This provides guaranteed delivery beyond probabilistic gossip by directly
-	// broadcasting state updates to all connected peers after consensus commits.
 	if n.stateReplicator != nil {
 		if err := n.stateReplicator(req); err != nil {
-			// Log the error but don't fail - state was applied locally and gossip
-			// will eventually propagate it via anti-entropy
+			// Log the error but don't fail - state was applied locally and gossip will eventually propagate it via anti-entropy
 			fmt.Printf("PBFT: Warning - State replication failed (will retry via anti-entropy): %v\n", err)
 		} else {
 			fmt.Printf("PBFT: ✅ State replicated to all peers for ticket %s\n", req.TicketID)
@@ -587,9 +594,19 @@ func (n *PBFTNode) executeRequest(sequence int64) error {
 
 	// Reset to idle
 	n.state = StateIdle
+	n.hasPendingClientRequest = false
 
 	// Reset view timer
 	n.viewTimer.Reset(n.viewTimeout)
+
+	// Request has been committed and executed — remove from log immediately.
+	// Checkpoint GC handles prepareLog/commitLog; requestLog can be pruned now.
+	delete(n.requestLog, sequence)
+
+	// Create checkpoint at interval to enable log garbage collection
+	if sequence%checkpointInterval == 0 {
+		n.createCheckpoint(sequence)
+	}
 
 	return nil
 }
@@ -601,28 +618,18 @@ func (n *PBFTNode) RegisterHandler(handler ConsensusHandler) {
 	n.handlers = append(n.handlers, handler)
 }
 
-// RegisterCallback registers a callback for a specific request that will be called
-// when consensus completes (success or failure). This enables synchronous API responses.
+// RegisterCallback registers a callback for a specific request that will be called when consensus completes (success or failure).
 func (n *PBFTNode) RegisterCallback(requestID string, callback ConsensusCallback) {
 	n.callbackMu.Lock()
 	defer n.callbackMu.Unlock()
 	n.requestCallbacks[requestID] = callback
 }
 
-// RegisterStateReplicator registers a callback that is invoked after consensus commits
-// to ensure reliable state propagation to all peers. This provides guaranteed delivery
-// beyond probabilistic gossip by directly broadcasting state updates to all connected peers.
+// RegisterStateReplicator registers a callback that is invoked after consensus commits to ensure reliable state propagation to all peers.
 func (n *PBFTNode) RegisterStateReplicator(replicator StateReplicator) {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	n.stateReplicator = replicator
-}
-
-// unregisterCallback removes a callback for a request
-func (n *PBFTNode) unregisterCallback(requestID string) {
-	n.callbackMu.Lock()
-	defer n.callbackMu.Unlock()
-	delete(n.requestCallbacks, requestID)
 }
 
 // invokeCallback calls and removes the callback for a request
@@ -708,17 +715,21 @@ func (n *PBFTNode) initiateViewChange() {
 	n.mu.Lock()
 
 	// Only trigger view change if there's a pending consensus operation
-	// If the node is idle, just reset the timer and continue
-	if n.state == StateIdle {
+	// or a pending client request waiting for the primary to act.
+	if n.state == StateIdle && !n.hasPendingClientRequest {
 		n.viewTimer.Reset(n.viewTimeout)
 		n.mu.Unlock()
 		return
 	}
 
+	// Clear the pending request flag - we are handling it via view change
+	n.hasPendingClientRequest = false
+
 	// There's a pending request that hasn't completed - trigger view change
 	fmt.Printf("Node %s: View timeout while in state %s, initiating view change\n", n.nodeID, n.state)
 
 	n.view++
+	newView := n.view
 
 	// Calculate which node should be primary for this view
 	primaryIndex := n.view % int64(n.totalNodes)
@@ -734,10 +745,240 @@ func (n *PBFTNode) initiateViewChange() {
 	n.state = StateIdle
 	n.viewTimer.Reset(n.viewTimeout)
 
+	// Record own view change vote
+	if n.viewChangeLog[newView] == nil {
+		n.viewChangeLog[newView] = make(map[string]*ViewChangeMsg)
+	}
+	n.viewChangeLog[newView][n.nodeID] = &ViewChangeMsg{
+		NewView: newView,
+		NodeID:  n.nodeID,
+	}
+
 	n.mu.Unlock()
+
+	// Broadcast VIEW_CHANGE message to other nodes
+	payload, err := SerializeViewChange(&ViewChangeMsg{
+		NewView: newView,
+		NodeID:  n.nodeID,
+	})
+	if err != nil {
+		fmt.Printf("Failed to serialize VIEW_CHANGE: %v\n", err)
+	} else {
+		data, err := SerializePBFTMessage(3, payload, n.nodeID) // 3 = VIEW_CHANGE type
+		if err != nil {
+			fmt.Printf("Failed to wrap VIEW_CHANGE message: %v\n", err)
+		} else {
+			go func() {
+				ctx, cancel := context.WithTimeout(n.ctx, broadcastTimeout)
+				defer cancel()
+				if err := n.broadcaster.Broadcast(ctx, data); err != nil {
+					fmt.Printf("Failed to broadcast VIEW_CHANGE: %v\n", err)
+				}
+			}()
+		}
+	}
 
 	// Fail all pending callbacks - consensus did not complete
 	n.failPendingCallbacks("view timeout")
+}
+
+// HandleViewChange handles incoming VIEW_CHANGE messages from other nodes.
+// When 2f+1 nodes agree on a new view, this node transitions to that view.
+func (n *PBFTNode) HandleViewChange(msg *ViewChangeMsg) error {
+	n.mu.Lock()
+
+	fmt.Printf("PBFT: Node %s received VIEW_CHANGE from %s for new view %d (current view: %d)\n",
+		n.nodeID, msg.NodeID, msg.NewView, n.view)
+
+	// Ignore view changes for views we've already passed
+	if msg.NewView <= n.view {
+		n.mu.Unlock()
+		return nil
+	}
+
+	// Store the view change vote
+	if n.viewChangeLog[msg.NewView] == nil {
+		n.viewChangeLog[msg.NewView] = make(map[string]*ViewChangeMsg)
+	}
+	n.viewChangeLog[msg.NewView][msg.NodeID] = msg
+
+	// Check if we have 2f+1 view change messages for this new view
+	required := 2*n.f + 1
+	if required < 1 {
+		required = 1
+	}
+	current := len(n.viewChangeLog[msg.NewView])
+
+	fmt.Printf("PBFT: Node %s VIEW_CHANGE progress for view %d: %d/%d\n",
+		n.nodeID, msg.NewView, current, required)
+
+	if current < required {
+		n.mu.Unlock()
+		return nil
+	}
+
+	// Quorum reached — transition to new view
+	fmt.Printf("PBFT: Node %s has VIEW_CHANGE quorum for view %d, transitioning\n",
+		n.nodeID, msg.NewView)
+
+	n.view = msg.NewView
+
+	// Calculate new primary
+	primaryIndex := n.view % int64(n.totalNodes)
+	expectedPrimaryID := fmt.Sprintf("node%d", primaryIndex)
+	n.isPrimary = (n.nodeID == expectedPrimaryID)
+
+	// Reset state
+	n.state = StateIdle
+	n.hasPendingClientRequest = false
+	n.viewTimer.Reset(n.viewTimeout)
+
+	// Clean up old view change logs
+	for v := range n.viewChangeLog {
+		if v <= n.view {
+			delete(n.viewChangeLog, v)
+		}
+	}
+
+	fmt.Printf("PBFT: Node %s transitioned to view %d, primary: %s, isPrimary: %v\n",
+		n.nodeID, n.view, expectedPrimaryID, n.isPrimary)
+
+	n.mu.Unlock()
+
+	// Fail pending callbacks outside the lock — old view consensus won't complete
+	n.failPendingCallbacks("view change")
+
+	return nil
+}
+
+// HandleCheckpoint handles incoming CHECKPOINT messages from other nodes.
+func (n *PBFTNode) HandleCheckpoint(ckpt *Checkpoint) error {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	fmt.Printf("PBFT: Node %s received CHECKPOINT from %s for seq %d\n",
+		n.nodeID, ckpt.NodeID, ckpt.Sequence)
+
+	// Ignore checkpoints at or below our last stable checkpoint
+	if ckpt.Sequence <= n.lastStableCheckpoint {
+		return nil
+	}
+
+	// Store checkpoint vote
+	if n.checkpointVotes[ckpt.Sequence] == nil {
+		n.checkpointVotes[ckpt.Sequence] = make(map[string]*Checkpoint)
+	}
+	n.checkpointVotes[ckpt.Sequence][ckpt.NodeID] = ckpt
+
+	// Check for stable checkpoint (2f+1 matching checkpoints)
+	required := 2*n.f + 1
+	if required < 1 {
+		required = 1
+	}
+	votes := n.checkpointVotes[ckpt.Sequence]
+
+	if len(votes) < required {
+		return nil
+	}
+
+	// Count votes per digest to verify agreement
+	digests := make(map[string]int)
+	for _, v := range votes {
+		digests[v.StateDigest]++
+	}
+
+	// Establish stable checkpoint if any digest has quorum
+	for digest, count := range digests {
+		if count >= required {
+			fmt.Printf("PBFT: Node %s stable checkpoint at seq %d (digest: %s)\n",
+				n.nodeID, ckpt.Sequence, digest)
+
+			n.lastStableCheckpoint = ckpt.Sequence
+			n.garbageCollect(ckpt.Sequence)
+
+			// Clean up old checkpoint votes
+			for seq := range n.checkpointVotes {
+				if seq <= ckpt.Sequence {
+					delete(n.checkpointVotes, seq)
+				}
+			}
+			break
+		}
+	}
+
+	return nil
+}
+
+// createCheckpoint creates and broadcasts a checkpoint at the given sequence.
+func (n *PBFTNode) createCheckpoint(sequence int64) {
+	// Compute state digest as hash of the sequence number.
+	digest := fmt.Sprintf("%d", sequence)
+	hash := sha256.Sum256([]byte(digest))
+	stateDigest := hex.EncodeToString(hash[:])
+
+	ckpt := &Checkpoint{
+		Sequence:    sequence,
+		StateDigest: stateDigest,
+		NodeID:      n.nodeID,
+		Timestamp:   time.Now().UnixNano(),
+	}
+
+	// Store own checkpoint
+	n.checkpoints[sequence] = ckpt
+
+	// Add own vote for checkpoint quorum
+	if n.checkpointVotes[sequence] == nil {
+		n.checkpointVotes[sequence] = make(map[string]*Checkpoint)
+	}
+	n.checkpointVotes[sequence][n.nodeID] = ckpt
+
+	fmt.Printf("PBFT: Node %s created checkpoint at seq %d\n", n.nodeID, sequence)
+
+	// Broadcast checkpoint (goroutine because caller holds the lock)
+	payload, err := SerializeCheckpoint(ckpt)
+	if err != nil {
+		fmt.Printf("Failed to serialize CHECKPOINT: %v\n", err)
+		return
+	}
+	data, err := SerializePBFTMessage(4, payload, n.nodeID) // 4 = CHECKPOINT type
+	if err != nil {
+		fmt.Printf("Failed to wrap CHECKPOINT message: %v\n", err)
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(n.ctx, broadcastTimeout)
+		defer cancel()
+		if err := n.broadcaster.Broadcast(ctx, data); err != nil {
+			fmt.Printf("Failed to broadcast CHECKPOINT: %v\n", err)
+		}
+	}()
+}
+
+// garbageCollect removes old consensus log entries up to the stable checkpoint.
+func (n *PBFTNode) garbageCollect(upToSequence int64) {
+	for seq := range n.requestLog {
+		if seq <= upToSequence {
+			delete(n.requestLog, seq)
+		}
+	}
+	for seq := range n.prepareLog {
+		if seq <= upToSequence {
+			delete(n.prepareLog, seq)
+		}
+	}
+	for seq := range n.commitLog {
+		if seq <= upToSequence {
+			delete(n.commitLog, seq)
+		}
+	}
+	for seq := range n.checkpoints {
+		if seq < upToSequence {
+			delete(n.checkpoints, seq)
+		}
+	}
+
+	fmt.Printf("PBFT: Node %s garbage collected logs up to seq %d\n", n.nodeID, upToSequence)
 }
 
 // GetView returns the current view
@@ -773,6 +1014,22 @@ func (n *PBFTNode) GetPrimary() string {
 	return fmt.Sprintf("node%d", primaryIndex)
 }
 
+// NotifyPendingRequest marks that a client request has been forwarded to the
+// primary but no consensus has started.
+func (n *PBFTNode) NotifyPendingRequest() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.hasPendingClientRequest = true
+	n.viewTimer.Reset(n.viewTimeout)
+}
+
+// ClearPendingRequest clears the pending client request flag, called when the request completes successfully or after a view change.
+func (n *PBFTNode) ClearPendingRequest() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.hasPendingClientRequest = false
+}
+
 // HandleNetworkMessage processes incoming PBFT messages from the network layer
 func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
 	var msg ConsensusMessage
@@ -783,6 +1040,9 @@ func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
 		0: "PRE_PREPARE",
 		1: "PREPARE",
 		2: "COMMIT",
+		3: "VIEW_CHANGE",
+		4: "CHECKPOINT",
+		6: "HEARTBEAT",
 		7: "CLIENT_REQUEST",
 	}[msgType]
 	if msgTypeName == "" {
@@ -815,16 +1075,34 @@ func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
 			fmt.Printf("PBFT: Node %s deserialized COMMIT from %s for seq %d, view %d\n",
 				n.nodeID, commit.NodeID, commit.Sequence, commit.View)
 		}
+	case 3: // VIEW_CHANGE
+		viewChangeMsg, err := DeserializeViewChange(payload)
+		if err != nil {
+			return fmt.Errorf("failed to deserialize view change: %w", err)
+		}
+		return n.HandleViewChange(viewChangeMsg)
+	case 4: // CHECKPOINT
+		ckpt, err := DeserializeCheckpoint(payload)
+		if err != nil {
+			return fmt.Errorf("failed to deserialize checkpoint: %w", err)
+		}
+		return n.HandleCheckpoint(ckpt)
+	case 6: // HEARTBEAT
+		fmt.Printf("PBFT: Node %s received HEARTBEAT (payload size: %d bytes)\n", n.nodeID, len(payload))
+		return nil
 	case 7: // CLIENT_REQUEST - forwarded from non-primary node
-		// Deserialize the request
 		req, err := DeserializeRequest(payload)
 		if err != nil {
 			return fmt.Errorf("failed to deserialize client request: %w", err)
 		}
 
-		// Only primary should receive and process forwarded client requests
 		if !n.IsPrimary() {
-			return fmt.Errorf("received client request but not primary")
+			// Non-primary: track the request so the view timer can trigger a
+			// view change if the primary never starts consensus (dead primary).
+			fmt.Printf("PBFT: Non-primary %s received CLIENT_REQUEST for ticket %s, tracking for view change\n",
+				n.nodeID, req.TicketID)
+			n.NotifyPendingRequest()
+			return nil
 		}
 
 		fmt.Printf("PBFT: Primary %s received forwarded client request for ticket %s\n", n.nodeID, req.TicketID)
@@ -861,12 +1139,17 @@ func (n *PBFTNode) Close() error {
 
 // Helper functions
 
-// computeDigest computes the digest of a request
+// computeDigest computes the digest of a request.
+// Uses strings.Builder to avoid the intermediate allocation of fmt.Sprintf.
 func (n *PBFTNode) computeDigest(req *Request) string {
-	data := fmt.Sprintf("%s:%s:%s:%d", req.RequestID, req.TicketID, req.Operation, req.Timestamp)
-	hash := sha256.Sum256([]byte(data))
+	var b strings.Builder
+	b.WriteString(req.RequestID)
+	b.WriteByte(':')
+	b.WriteString(req.TicketID)
+	b.WriteByte(':')
+	b.WriteString(req.Operation)
+	b.WriteByte(':')
+	b.WriteString(strconv.FormatInt(req.Timestamp, 10))
+	hash := sha256.Sum256([]byte(b.String()))
 	return hex.EncodeToString(hash[:])
 }
-
-// Old string serialization functions removed - now using protobuf
-// See messages.go for the new SerializePrePrepare/Prepare/Commit functions

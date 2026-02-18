@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"sync"
+	"sync/atomic"
 
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/crypto"
@@ -23,6 +24,10 @@ import (
 const (
 	// ProtocolID is the protocol identifier for validator communication
 	ProtocolID = protocol.ID("/validator/1.0.0")
+
+	// MaxConcurrentBroadcasts limits concurrent outgoing sends during broadcast
+	// to prevent goroutine explosion under high broadcast rates.
+	MaxConcurrentBroadcasts = 10
 )
 
 // P2PHost represents a libp2p host for validator nodes
@@ -267,7 +272,8 @@ func (p *P2PHost) SendTo(ctx context.Context, nodeID string, data []byte) error 
 	return p.SendMessage(ctx, peerID, data)
 }
 
-// Broadcast sends a message to all connected peers
+// Broadcast sends a message to all connected peers using a bounded worker pool
+// to prevent goroutine explosion under high broadcast rates.
 func (p *P2PHost) Broadcast(ctx context.Context, data []byte) error {
 	p.mu.RLock()
 	peers := make([]peer.ID, 0, len(p.peers))
@@ -286,21 +292,24 @@ func (p *P2PHost) Broadcast(ctx context.Context, data []byte) error {
 	}
 
 	var wg sync.WaitGroup
-	errChan := make(chan error, len(peers))
-	successCount := 0
-	var successMu sync.Mutex
+	errChan := make(chan error, peerCount)
+	var successCount atomic.Int64
+
+	// Semaphore to limit concurrent sends
+	sem := make(chan struct{}, MaxConcurrentBroadcasts)
 
 	for _, peerID := range peers {
 		wg.Add(1)
 		go func(pid peer.ID) {
 			defer wg.Done()
+			sem <- struct{}{}        // Acquire
+			defer func() { <-sem }() // Release
+
 			if err := p.SendMessage(ctx, pid, data); err != nil {
 				fmt.Printf("P2P: Failed to send to peer %s: %v\n", pid, err)
 				errChan <- err
 			} else {
-				successMu.Lock()
-				successCount++
-				successMu.Unlock()
+				successCount.Add(1)
 			}
 		}(peerID)
 	}
@@ -310,7 +319,7 @@ func (p *P2PHost) Broadcast(ctx context.Context, data []byte) error {
 
 	// Log success summary
 	if peerCount > 0 {
-		fmt.Printf("P2P: ✅ Successfully broadcast to %d/%d peer(s)\n", successCount, peerCount)
+		fmt.Printf("P2P: ✅ Successfully broadcast to %d/%d peer(s)\n", successCount.Load(), peerCount)
 	}
 
 	// Return first error if any

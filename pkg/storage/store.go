@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/boltdb/bolt"
@@ -143,6 +144,9 @@ func (s *Store) GetAllTickets() ([]*TicketRecord, error) {
 			return fmt.Errorf("bucket %s not found", BucketTickets)
 		}
 
+		// Pre-allocate with exact count from bucket stats
+		tickets = make([]*TicketRecord, 0, b.Stats().KeyN)
+
 		return b.ForEach(func(k, v []byte) error {
 			ticket := &TicketRecord{}
 			if err := json.Unmarshal(v, ticket); err != nil {
@@ -181,8 +185,7 @@ func (s *Store) SaveConsensusLog(record *ConsensusRecord) error {
 		}
 
 		// Use sequence number as key
-		key := []byte(fmt.Sprintf("%016d", record.Sequence))
-		return b.Put(key, data)
+		return b.Put(sequenceKey(record.Sequence), data)
 	})
 }
 
@@ -196,8 +199,7 @@ func (s *Store) GetConsensusLog(sequence int64) (*ConsensusRecord, error) {
 			return fmt.Errorf("bucket %s not found", BucketConsensus)
 		}
 
-		key := []byte(fmt.Sprintf("%016d", sequence))
-		data := b.Get(key)
+		data := b.Get(sequenceKey(sequence))
 		if data == nil {
 			return fmt.Errorf("consensus log %d not found", sequence)
 		}
@@ -245,8 +247,7 @@ func (s *Store) SaveCheckpoint(checkpoint *CheckpointRecord) error {
 			return fmt.Errorf("failed to marshal checkpoint: %w", err)
 		}
 
-		key := []byte(fmt.Sprintf("%016d", checkpoint.Sequence))
-		return b.Put(key, data)
+		return b.Put(sequenceKey(checkpoint.Sequence), data)
 	})
 }
 
@@ -318,21 +319,38 @@ func (s *Store) Backup(path string) error {
 func (s *Store) GetStats() map[string]interface{} {
 	stats := s.db.Stats()
 	return map[string]interface{}{
-		"tx_count":        stats.TxN,
-		"open_tx_count":   stats.OpenTxN,
-		"page_count":      stats.TxStats.PageCount,
-		"page_alloc":      stats.TxStats.PageAlloc,
-		"cursor_count":    stats.TxStats.CursorCount,
-		"node_count":      stats.TxStats.NodeCount,
-		"node_deref":      stats.TxStats.NodeDeref,
-		"rebalance":       stats.TxStats.Rebalance,
-		"rebalance_time":  stats.TxStats.RebalanceTime,
-		"split":           stats.TxStats.Split,
-		"spill":           stats.TxStats.Spill,
-		"spill_time":      stats.TxStats.SpillTime,
-		"write":           stats.TxStats.Write,
-		"write_time":      stats.TxStats.WriteTime,
+		"tx_count":       stats.TxN,
+		"open_tx_count":  stats.OpenTxN,
+		"page_count":     stats.TxStats.PageCount,
+		"page_alloc":     stats.TxStats.PageAlloc,
+		"cursor_count":   stats.TxStats.CursorCount,
+		"node_count":     stats.TxStats.NodeCount,
+		"node_deref":     stats.TxStats.NodeDeref,
+		"rebalance":      stats.TxStats.Rebalance,
+		"rebalance_time": stats.TxStats.RebalanceTime,
+		"split":          stats.TxStats.Split,
+		"spill":          stats.TxStats.Spill,
+		"spill_time":     stats.TxStats.SpillTime,
+		"write":          stats.TxStats.Write,
+		"write_time":     stats.TxStats.WriteTime,
 	}
+}
+
+// sequenceKey converts an int64 sequence number to a zero-padded key.
+// Uses strconv instead of fmt.Sprintf for lower allocation overhead.
+// Max int64 is 19 digits, so we use a 20-byte buffer for safety.
+func sequenceKey(seq int64) []byte {
+	const width = 20
+	s := strconv.FormatInt(seq, 10)
+	if len(s) >= width {
+		return []byte(s)
+	}
+	var key [width]byte
+	for i := range key {
+		key[i] = '0'
+	}
+	copy(key[width-len(s):], s)
+	return key[:]
 }
 
 // Close closes the database
@@ -341,7 +359,6 @@ func (s *Store) Close() error {
 }
 
 // Compact performs database compaction (not directly supported by BoltDB)
-// This creates a new database and copies data over
 func (s *Store) Compact(newPath string) error {
 	// Create new database
 	newDB, err := bolt.Open(newPath, 0600, &bolt.Options{Timeout: 10 * time.Second})

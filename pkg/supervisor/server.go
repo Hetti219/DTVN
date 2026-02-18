@@ -5,6 +5,7 @@ import (
 	"crypto/subtle"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,17 +20,25 @@ import (
 
 // Server represents the supervisor HTTP server
 type Server struct {
-	addr           string
-	router         *mux.Router
-	server         *http.Server
-	nodeManager    *NodeManager
-	simController  *SimulatorController
-	wsClients      map[*websocket.Conn]bool
-	wsMu           sync.RWMutex
-	wsWriteMu      sync.Mutex // Serializes WebSocket writes to prevent concurrent write panic
-	wsUpgrader     websocket.Upgrader
-	staticDir      string
-	apiKey         string
+	addr          string
+	router        *mux.Router
+	server        *http.Server
+	nodeManager   *NodeManager
+	simController *SimulatorController
+	wsClients     map[*websocket.Conn]bool
+	wsMu          sync.RWMutex
+	wsUpgrader    websocket.Upgrader
+	proxyClient   *http.Client // Shared HTTP client for proxy requests (reuses connections)
+	staticDir     string
+	apiKey        string
+	stopCh        chan struct{} // signals background goroutines to stop
+
+	// WebSocket broadcast channel - decouples producers from slow consumers
+	wsBroadcast chan map[string]interface{}
+
+	// Output throttle: per-node rate limiting for log broadcasts
+	outputMu       sync.Mutex
+	outputThrottle map[string]time.Time
 }
 
 // ServerConfig holds server configuration
@@ -58,11 +67,28 @@ func NewServer(cfg *ServerConfig) *Server {
 		addr:      addr,
 		router:    mux.NewRouter(),
 		wsClients: make(map[*websocket.Conn]bool),
-		staticDir: cfg.StaticDir,
-		apiKey:    cfg.APIKey,
+		// Shared HTTP client with transport tuned for many nodes
+		proxyClient: &http.Client{
+			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 4,
+				MaxConnsPerHost:     10,
+				IdleConnTimeout:     30 * time.Second,
+				DialContext: (&net.Dialer{
+					Timeout:   5 * time.Second,
+					KeepAlive: 30 * time.Second,
+				}).DialContext,
+			},
+		},
+		staticDir:      cfg.StaticDir,
+		apiKey:         cfg.APIKey,
+		stopCh:         make(chan struct{}),
+		wsBroadcast:    make(chan map[string]interface{}, 512),
+		outputThrottle: make(map[string]time.Time),
 		wsUpgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
-			WriteBufferSize: 1024,
+			WriteBufferSize: 4096, // Larger write buffer for broadcast bursts
 			CheckOrigin:     checkSupervisorWSOrigin,
 		},
 	}
@@ -73,6 +99,17 @@ func NewServer(cfg *ServerConfig) *Server {
 		DataDir:       cfg.DataDir,
 		APIKey:        cfg.APIKey,
 		OutputCallback: func(nodeID string, line string) {
+			// Throttle output broadcasts: max 1 per 50ms per node
+			s.outputMu.Lock()
+			last, exists := s.outputThrottle[nodeID]
+			now := time.Now()
+			if exists && now.Sub(last) < 50*time.Millisecond {
+				s.outputMu.Unlock()
+				return
+			}
+			s.outputThrottle[nodeID] = now
+			s.outputMu.Unlock()
+
 			s.broadcastWSMessage(map[string]interface{}{
 				"type":    "node_output",
 				"node_id": nodeID,
@@ -239,12 +276,21 @@ func (s *Server) Start() error {
 		WriteTimeout: 60 * time.Second,
 	}
 
+	// Start background monitor that detects PBFT primary changes via view change
+	go s.monitorPrimaryStatus()
+
+	// Start WebSocket broadcast pump (single goroutine drains the channel)
+	go s.wsBroadcastPump()
+
 	fmt.Printf("Supervisor server starting on http://%s\n", s.addr)
 	return s.server.ListenAndServe()
 }
 
 // Stop stops the HTTP server
 func (s *Server) Stop(ctx context.Context) error {
+	// Stop background goroutines
+	close(s.stopCh)
+
 	// Stop all managed nodes
 	s.nodeManager.StopAllNodes()
 
@@ -265,6 +311,115 @@ func (s *Server) Stop(ctx context.Context) error {
 	return s.server.Shutdown(ctx)
 }
 
+// wsBroadcastPump is the single goroutine that handles all WebSocket writes.
+// It drains the broadcast channel and writes to all connected clients with
+// a per-write timeout. Dead or slow clients are removed automatically.
+func (s *Server) wsBroadcastPump() {
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case msg := <-s.wsBroadcast:
+			s.wsMu.RLock()
+			clients := make([]*websocket.Conn, 0, len(s.wsClients))
+			for conn := range s.wsClients {
+				clients = append(clients, conn)
+			}
+			s.wsMu.RUnlock()
+
+			var deadClients []*websocket.Conn
+			for _, conn := range clients {
+				// Set a write deadline so a slow client can't block the pump
+				conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				if err := conn.WriteJSON(msg); err != nil {
+					deadClients = append(deadClients, conn)
+				}
+			}
+
+			// Remove dead clients
+			if len(deadClients) > 0 {
+				s.wsMu.Lock()
+				for _, conn := range deadClients {
+					delete(s.wsClients, conn)
+					conn.Close()
+				}
+				s.wsMu.Unlock()
+			}
+		}
+	}
+}
+
+// monitorPrimaryStatus periodically polls running validator nodes to detect
+// PBFT primary changes (e.g., after a view change when the old primary went down).
+// When a change is detected, it updates the manager and broadcasts a WebSocket event
+// so the dashboard and network graph reflect the new primary in real time.
+func (s *Server) monitorPrimaryStatus() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopCh:
+			return
+		case <-ticker.C:
+			s.refreshPrimaryStatus()
+		}
+	}
+}
+
+// refreshPrimaryStatus queries each running node's stats endpoint in parallel
+// and updates the supervisor's primary tracking if the consensus layer has changed.
+func (s *Server) refreshPrimaryStatus() {
+	nodes := s.nodeManager.GetAllNodes()
+
+	type nodeResult struct {
+		nodeID    string
+		isPrimary bool
+	}
+
+	var wg sync.WaitGroup
+	results := make(chan nodeResult, len(nodes))
+
+	for _, node := range nodes {
+		if node.Status != NodeStatusRunning {
+			continue
+		}
+
+		wg.Add(1)
+		go func(n *ManagedNode) {
+			defer wg.Done()
+			url := fmt.Sprintf("http://127.0.0.1:%d", n.APIPort)
+			isPrimary, err := s.checkNodeIsPrimary(url)
+			if err != nil {
+				return
+			}
+			results <- nodeResult{nodeID: n.ID, isPrimary: isPrimary}
+		}(node)
+	}
+
+	// Close results channel when all goroutines finish
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	for res := range results {
+		if s.nodeManager.UpdatePrimaryStatus(res.nodeID, res.isPrimary) {
+			// Primary status changed — broadcast to all connected dashboards
+			updatedNode, err := s.nodeManager.GetNode(res.nodeID)
+			if err != nil {
+				continue
+			}
+			s.broadcastWSMessage(map[string]interface{}{
+				"type":    "node_status",
+				"node_id": res.nodeID,
+				"status":  updatedNode.Status,
+				"node":    updatedNode,
+			})
+		}
+	}
+}
+
 // API Handlers
 
 func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
@@ -282,6 +437,9 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetNodes(w http.ResponseWriter, r *http.Request) {
+	// Refresh primary status from live consensus state before responding,
+	// so the frontend sees correct primary/replica roles after view changes.
+	s.refreshPrimaryStatus()
 	nodes := s.nodeManager.GetAllNodes()
 	s.writeJSON(w, nodes)
 }
@@ -536,24 +694,23 @@ func (s *Server) handleWSMessages(conn *websocket.Conn) {
 }
 
 func (s *Server) sendWSMessage(conn *websocket.Conn, msg map[string]interface{}) {
-	s.wsWriteMu.Lock()
-	defer s.wsWriteMu.Unlock()
-	conn.WriteJSON(msg)
+	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := conn.WriteJSON(msg); err != nil {
+		// Remove dead client
+		s.wsMu.Lock()
+		delete(s.wsClients, conn)
+		s.wsMu.Unlock()
+		conn.Close()
+	}
 }
 
+// broadcastWSMessage sends a message to all connected WebSocket clients
+// via the broadcast pump channel. Non-blocking: drops message if channel is full.
 func (s *Server) broadcastWSMessage(msg map[string]interface{}) {
-	s.wsMu.RLock()
-	clients := make([]*websocket.Conn, 0, len(s.wsClients))
-	for conn := range s.wsClients {
-		clients = append(clients, conn)
-	}
-	s.wsMu.RUnlock()
-
-	// Write to all clients with write lock to prevent concurrent writes
-	s.wsWriteMu.Lock()
-	defer s.wsWriteMu.Unlock()
-	for _, conn := range clients {
-		conn.WriteJSON(msg)
+	select {
+	case s.wsBroadcast <- msg:
+	default:
+		// Channel full — drop message to prevent blocking callers
 	}
 }
 

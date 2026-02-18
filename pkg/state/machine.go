@@ -113,7 +113,7 @@ func (sm *StateMachine) SeedTickets(tickets []*Ticket) (int, error) {
 }
 
 // ValidateTicket validates a ticket and transitions it from ISSUED to VALIDATED state.
-// The ticket must already exist (i.e., it was issued/sold before the event).
+// The ticket must already exist
 func (sm *StateMachine) ValidateTicket(ticketID string, validatorID string, data []byte) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
@@ -124,17 +124,17 @@ func (sm *StateMachine) ValidateTicket(ticketID string, validatorID string, data
 		return fmt.Errorf("ticket %s not found — ticket must be issued before validation", ticketID)
 	}
 
-	// Only ISSUED tickets can be validated
-	if ticket.State == StateValidated {
+	// Only ISSUED tickets can be validated — use switch for clarity and efficiency
+	switch ticket.State {
+	case StateIssued:
+		// OK, proceed
+	case StateValidated:
 		return fmt.Errorf("ticket %s already validated", ticketID)
-	}
-	if ticket.State == StateConsumed {
+	case StateConsumed:
 		return fmt.Errorf("ticket %s already consumed", ticketID)
-	}
-	if ticket.State == StateDisputed {
+	case StateDisputed:
 		return fmt.Errorf("ticket %s is disputed", ticketID)
-	}
-	if ticket.State != StateIssued {
+	default:
 		return fmt.Errorf("ticket %s cannot be validated (current state: %s)", ticketID, ticket.State)
 	}
 
@@ -167,13 +167,9 @@ func (sm *StateMachine) ValidateTicket(ticketID string, validatorID string, data
 	}
 
 	// Publish state update via gossip SYNCHRONOUSLY
-	// This ensures the state update is published before the handler returns,
-	// preventing race conditions where the API returns success but the state
-	// hasn't been replicated to other nodes yet.
 	if sm.publishUpdate != nil {
 		if err := sm.publishUpdate(ticketID, StateValidated, validatorID, ticket.Timestamp); err != nil {
-			// Log the error but don't fail - the state was applied locally
-			// and gossip will eventually propagate it via anti-entropy
+			// Log the error but don't fail
 			fmt.Printf("Warning: Failed to publish state update (will retry via anti-entropy): %v\n", err)
 		}
 	}
@@ -462,10 +458,69 @@ func (sm *StateMachine) SyncTicket(ticketID string, validatorID string, data []b
 	return nil
 }
 
+// StateNotifier provides event-driven notifications for ticket state changes.
+// Callers subscribe for a specific ticket ID and receive a notification on the
+// returned channel when that ticket's state changes. This avoids busy-polling.
+type StateNotifier struct {
+	mu          sync.Mutex
+	subscribers map[string][]chan TicketState
+}
+
+// NewStateNotifier creates a new StateNotifier.
+func NewStateNotifier() *StateNotifier {
+	return &StateNotifier{
+		subscribers: make(map[string][]chan TicketState),
+	}
+}
+
+// Subscribe returns a channel that will receive the new state when the given
+// ticket transitions. The caller must call Unsubscribe when done to avoid leaks.
+func (sn *StateNotifier) Subscribe(ticketID string) chan TicketState {
+	ch := make(chan TicketState, 1)
+	sn.mu.Lock()
+	sn.subscribers[ticketID] = append(sn.subscribers[ticketID], ch)
+	sn.mu.Unlock()
+	return ch
+}
+
+// Unsubscribe removes a previously registered channel for a ticket.
+func (sn *StateNotifier) Unsubscribe(ticketID string, ch chan TicketState) {
+	sn.mu.Lock()
+	defer sn.mu.Unlock()
+	subs := sn.subscribers[ticketID]
+	for i, s := range subs {
+		if s == ch {
+			sn.subscribers[ticketID] = append(subs[:i], subs[i+1:]...)
+			break
+		}
+	}
+	if len(sn.subscribers[ticketID]) == 0 {
+		delete(sn.subscribers, ticketID)
+	}
+}
+
+// Notify sends the new state to all subscribers of a ticket.
+func (sn *StateNotifier) Notify(ticketID string, newState TicketState) {
+	sn.mu.Lock()
+	subs := sn.subscribers[ticketID]
+	// Copy so we can release the lock before sending.
+	copied := make([]chan TicketState, len(subs))
+	copy(copied, subs)
+	sn.mu.Unlock()
+
+	for _, ch := range copied {
+		select {
+		case ch <- newState:
+		default:
+			// Channel full — subscriber will see the state on next check.
+		}
+	}
+}
+
 // Helper functions
 
 func copyMetadata(metadata map[string]string) map[string]string {
-	copy := make(map[string]string)
+	copy := make(map[string]string, len(metadata))
 	for k, v := range metadata {
 		copy[k] = v
 	}

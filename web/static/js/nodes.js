@@ -280,6 +280,9 @@ export class NodeManager {
         let node = this.nodes.find(n => n.id === nodeId);
         if (node) {
             node.status = status;
+            if (nodeInfo) {
+                node.is_primary = nodeInfo.is_primary;
+            }
         } else if (nodeInfo) {
             // New node we don't know about yet - add it from the WebSocket payload
             this.nodes.push({

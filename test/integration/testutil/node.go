@@ -21,27 +21,27 @@ import (
 
 // TestNode represents a validator node under test
 type TestNode struct {
-	ID              string
-	Index           int
-	APIPort         int
-	P2PPort         int
-	DataDir         string
-	LogFile         string
-	BootstrapAddr   string
-	IsByzantine     bool
-	IsBootstrap     bool
-	TotalNodes      int
+	ID            string
+	Index         int
+	APIPort       int
+	P2PPort       int
+	DataDir       string
+	LogFile       string
+	BootstrapAddr string
+	IsByzantine   bool
+	IsBootstrap   bool
+	TotalNodes    int
 
-	cmd             *exec.Cmd
-	ctx             context.Context
-	cancel          context.CancelFunc
-	started         bool
-	healthy         bool
-	stdout          *os.File
-	stderr          *os.File
-	mu              sync.RWMutex
+	cmd     *exec.Cmd
+	ctx     context.Context
+	cancel  context.CancelFunc
+	started bool
+	healthy bool
+	stdout  *os.File
+	stderr  *os.File
+	mu      sync.RWMutex
 
-	httpClient      *http.Client
+	httpClient *http.Client
 }
 
 // NodeConfig holds configuration for a test node

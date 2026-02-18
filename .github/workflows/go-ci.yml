@@ -1,4 +1,4 @@
-name: Go CI
+name: CI
 
 on:
   push:
@@ -8,27 +8,254 @@ on:
 
 permissions:
   contents: read
+  security-events: write # For CodeQL and security scanning
+
+env:
+  GO_VERSION: '1.25.5'
 
 jobs:
-  build-and-test:
-    name: Build and Test
+  # Fast checks that run first to provide quick feedback
+  lint:
+    name: Lint
     runs-on: ubuntu-latest
-
+    timeout-minutes: 10
     steps:
     - name: Checkout code
-      uses: actions/checkout@v6
+      uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v6
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.25.5'
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: latest
+        args: --timeout=5m
+
+  # Check code formatting
+  format:
+    name: Format Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Check formatting
+      run: |
+        if [ -n "$(gofmt -l .)" ]; then
+          echo "The following files are not formatted:"
+          gofmt -l .
+          exit 1
+        fi
+
+    - name: Verify go.mod and go.sum
+      run: |
+        go mod tidy
+        git diff --exit-code go.mod go.sum
+
+  # Security scanning
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Run Gosec Security Scanner
+      uses: securego/gosec@master
+      with:
+        args: '-no-fail -fmt sarif -out gosec-results.sarif ./...'
+
+    - name: Upload Gosec results to GitHub Security tab
+      uses: github/codeql-action/upload-sarif@v3
+      if: always()
+      with:
+        sarif_file: gosec-results.sarif
+
+  # Vulnerability checking
+  vulnerability:
+    name: Vulnerability Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Install govulncheck
+      run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+    - name: Run govulncheck
+      run: govulncheck ./...
+
+  # Build and unit tests
+  build-and-test:
+    name: Build & Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
         cache: true
 
     - name: Download dependencies
       run: go mod download
 
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Create bin directory
+      run: mkdir -p bin
+
+    - name: Build validator
+      run: go build -v -o bin/validator ./cmd/validator
+
+    - name: Build simulator
+      run: go build -v -o bin/simulator ./cmd/simulator
+
+    - name: Build supervisor
+      run: go build -v -o bin/supervisor ./cmd/supervisor
+
+    - name: Run unit tests
+      run: make test-unit
+      timeout-minutes: 10
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: binaries
+        path: bin/
+        retention-days: 7
+
+  # Unit tests with coverage
+  coverage:
+    name: Test Coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Run tests with coverage
+      run: go test -v -short -race -coverprofile=coverage.out -covermode=atomic ./...
+      timeout-minutes: 10
+
+    - name: Generate coverage report
+      run: go tool cover -html=coverage.out -o coverage.html
+
+    - name: Upload coverage to artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-report
+        path: |
+          coverage.out
+          coverage.html
+        retention-days: 30
+
+    - name: Display coverage summary
+      run: |
+        echo "Coverage summary:"
+        go tool cover -func=coverage.out | tail -1
+
+  # Cross-platform build verification
+  build-matrix:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
     - name: Build
       run: make build
 
-    - name: Run tests
-      run: make test
+  # Integration tests (run separately, can be skipped for faster CI)
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Only run on push to main or if PR has 'run-integration' label
+    if: github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'run-integration')
+    needs: [build-and-test]
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ env.GO_VERSION }}
+        cache: true
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Build binaries
+      run: make build
+
+    - name: Run integration tests
+      run: make test-integration-verbose
+      timeout-minutes: 25
+
+  # Final status check (required for branch protection)
+  ci-success:
+    name: CI Success
+    runs-on: ubuntu-latest
+    needs: [lint, format, security, vulnerability, build-and-test, coverage, build-matrix]
+    if: always()
+    steps:
+    - name: Check all jobs
+      run: |
+        if [[ "${{ needs.lint.result }}" != "success" || \
+              "${{ needs.format.result }}" != "success" || \
+              "${{ needs.security.result }}" != "success" || \
+              "${{ needs.vulnerability.result }}" != "success" || \
+              "${{ needs.build-and-test.result }}" != "success" || \
+              "${{ needs.coverage.result }}" != "success" || \
+              "${{ needs.build-matrix.result }}" != "success" ]]; then
+          echo "One or more required jobs failed"
+          exit 1
+        fi

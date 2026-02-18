@@ -1,0 +1,136 @@
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - errcheck      # Check for unchecked errors
+    - gosimple      # Simplify code
+    - govet         # Standard Go vet
+    - ineffassign   # Detect ineffectual assignments
+    - staticcheck   # Advanced static analysis
+    - unused        # Find unused code
+    - gofmt         # Check formatting
+    - goimports     # Check import formatting
+    - misspell      # Find misspelled English words
+    - revive        # Fast, configurable, extensible linter
+    - typecheck     # Type checking
+    - gosec         # Security-focused linter
+    - bodyclose     # Check HTTP response body closed
+    - unconvert     # Remove unnecessary type conversions
+    - gocritic      # The most opinionated Go linter
+    - gocyclo       # Cyclomatic complexity
+    - dupl          # Code clone detection
+    - goconst       # Find repeated strings that could be constants
+    - prealloc      # Find slice declarations that could be preallocated
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    exclude-functions:
+      - (*database/sql.Rows).Close
+      - (*github.com/boltdb/bolt.Tx).Rollback
+
+  govet:
+    enable-all: true
+    disable:
+      - shadow      # Too strict for this codebase
+
+  gocyclo:
+    min-complexity: 15
+
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - whyNoLint
+      - unnamedResult
+
+  gosec:
+    excludes:
+      - G104 # Errors unhandled (covered by errcheck)
+      - G304 # File path provided as taint input (we use user-provided paths intentionally)
+
+  revive:
+    rules:
+      - name: blank-imports
+      - name: context-as-argument
+      - name: error-return
+      - name: error-strings
+      - name: error-naming
+      - name: exported
+        disabled: true # Too strict for tests
+      - name: if-return
+      - name: increment-decrement
+      - name: var-naming
+      - name: package-comments
+        disabled: true # Not all packages need comments
+      - name: range
+      - name: receiver-naming
+      - name: time-naming
+      - name: unexported-return
+      - name: indent-error-flow
+      - name: errorf
+      - name: empty-block
+      - name: superfluous-else
+      - name: unused-parameter
+        disabled: true # Interface implementations may not use all params
+      - name: unreachable-code
+      - name: redefines-builtin-id
+
+  dupl:
+    threshold: 150
+
+issues:
+  # Maximum issues count per one linter
+  max-issues-per-linter: 0
+
+  # Maximum count of issues with the same text
+  max-same-issues: 0
+
+  # Exclude some linters from running on test files
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - dupl
+        - gosec
+        - goconst
+        - gocyclo
+
+    # Exclude generated protocol buffer code
+    - path: '\.pb\.go$'
+      linters:
+        - all
+
+    # Allow init functions (used for crypto key generation)
+    - source: "func init\\(\\)"
+      linters:
+        - gochecknoinits
+
+    # Allow globals in main packages
+    - path: cmd/
+      linters:
+        - gochecknoglobals
+
+    # Ignore long lines in generated code
+    - path: proto/
+      linters:
+        - lll
+
+    # Ignore error shadowing in specific cases
+    - text: "shadow: declaration of \"err\""
+      linters:
+        - govet
+
+  # Show all issues from a linter
+  exclude-use-default: false

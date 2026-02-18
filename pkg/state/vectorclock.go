@@ -68,7 +68,8 @@ func (vc *VectorClock) Merge(other *VectorClock) {
 	}
 }
 
-// Compare compares this clock with another clock
+// Compare compares this clock with another clock.
+// Avoids allocating an intermediate map by iterating each clock separately.
 func (vc *VectorClock) Compare(other *VectorClock) Ordering {
 	vc.mu.RLock()
 	defer vc.mu.RUnlock()
@@ -76,27 +77,34 @@ func (vc *VectorClock) Compare(other *VectorClock) Ordering {
 	other.mu.RLock()
 	defer other.mu.RUnlock()
 
-	// Get all node IDs
-	allNodes := make(map[string]bool)
-	for nodeID := range vc.clocks {
-		allNodes[nodeID] = true
-	}
-	for nodeID := range other.clocks {
-		allNodes[nodeID] = true
-	}
-
 	lessOrEqual := true
 	greaterOrEqual := true
 
-	for nodeID := range allNodes {
-		thisClock := vc.clocks[nodeID]
-		otherClock := other.clocks[nodeID]
-
+	// Check all entries in vc against other
+	for nodeID, thisClock := range vc.clocks {
+		otherClock := other.clocks[nodeID] // 0 if missing
 		if thisClock < otherClock {
 			greaterOrEqual = false
 		}
 		if thisClock > otherClock {
 			lessOrEqual = false
+		}
+		if !lessOrEqual && !greaterOrEqual {
+			return Concurrent // Early exit
+		}
+	}
+
+	// Check entries in other that are NOT in vc (they compare as 0 < otherClock)
+	for nodeID, otherClock := range other.clocks {
+		if _, exists := vc.clocks[nodeID]; exists {
+			continue // Already compared above
+		}
+		// thisClock is implicitly 0
+		if otherClock > 0 {
+			greaterOrEqual = false
+		}
+		if !lessOrEqual && !greaterOrEqual {
+			return Concurrent // Early exit
 		}
 	}
 
@@ -124,7 +132,7 @@ func (vc *VectorClock) GetAll() map[string]uint64 {
 	vc.mu.RLock()
 	defer vc.mu.RUnlock()
 
-	clocks := make(map[string]uint64)
+	clocks := make(map[string]uint64, len(vc.clocks))
 	for k, v := range vc.clocks {
 		clocks[k] = v
 	}

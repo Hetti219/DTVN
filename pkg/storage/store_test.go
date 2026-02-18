@@ -221,7 +221,7 @@ func TestTicketOperations(t *testing.T) {
 		// Add multiple tickets
 		for i := 1; i <= 5; i++ {
 			ticket := &TicketRecord{
-				ID:          string(rune('A' + i - 1)) + "-ticket",
+				ID:          string(rune('A'+i-1)) + "-ticket",
 				State:       "VALIDATED",
 				ValidatorID: "validator-1",
 				Timestamp:   time.Now().Unix(),
