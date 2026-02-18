@@ -188,6 +188,15 @@ func TestProposeRequest(t *testing.T) {
 		require.NoError(t, err)
 		defer node.Close()
 
+		// Register a handler to capture the executed request.
+		// After execution the requestLog entry is deleted (optimization), so
+		// we verify execution via the handler callback instead.
+		var executedReq *Request
+		node.RegisterHandler(func(r *Request) error {
+			executedReq = r
+			return nil
+		})
+
 		node.Start()
 
 		req := &Request{
@@ -200,17 +209,17 @@ func TestProposeRequest(t *testing.T) {
 		err = node.ProposeRequest(req)
 		require.NoError(t, err)
 
-		// Give time for async broadcast
+		// Give time for async broadcast and execution
 		time.Sleep(100 * time.Millisecond)
 
 		// Verify sequence incremented
 		assert.Equal(t, int64(1), node.GetSequence())
 
-		// Verify request stored
-		node.mu.RLock()
-		storedReq := node.requestLog[1]
-		node.mu.RUnlock()
-		assert.Equal(t, req, storedReq)
+		// Verify the request was executed by the handler (requestLog is pruned after execution)
+		require.NotNil(t, executedReq)
+		assert.Equal(t, req.RequestID, executedReq.RequestID)
+		assert.Equal(t, req.TicketID, executedReq.TicketID)
+		assert.Equal(t, req.Operation, executedReq.Operation)
 	})
 
 	t.Run("ReplicaCannotPropose", func(t *testing.T) {
