@@ -83,9 +83,10 @@ type SimulatorController struct {
 	resultCallback   func(results *SimulatorResults)
 
 	// Deduplication fields
-	dedupMu     sync.Mutex
-	recentLines map[string]time.Time
-	dedupWindow time.Duration
+	dedupMu          sync.Mutex
+	recentLines      map[string]time.Time
+	dedupWindow      time.Duration
+	dedupCallCount   int // tracks calls to isDuplicateLine for periodic cleanup
 }
 
 // SimulatorControllerConfig holds controller configuration
@@ -226,12 +227,15 @@ func (s *SimulatorController) runSimulator(config *SimulatorConfig) {
 	s.notifyStatus(status)
 }
 
-// isDuplicateLine checks if a line was recently seen (within deduplication window)
+// isDuplicateLine checks if a line was recently seen (within deduplication window).
+// Cleanup of stale entries runs every 100 calls instead of on every invocation
+// to avoid O(n) map iteration overhead on high-frequency log streams.
 func (s *SimulatorController) isDuplicateLine(line string) bool {
 	s.dedupMu.Lock()
 	defer s.dedupMu.Unlock()
 
 	now := time.Now()
+	s.dedupCallCount++
 
 	// Check if line was recently seen
 	if lastSeen, exists := s.recentLines[line]; exists {
@@ -245,11 +249,15 @@ func (s *SimulatorController) isDuplicateLine(line string) bool {
 	// Mark line as seen
 	s.recentLines[line] = now
 
-	// Clean up old entries (older than 2x dedup window)
-	cleanupThreshold := now.Add(-2 * s.dedupWindow)
-	for key, timestamp := range s.recentLines {
-		if timestamp.Before(cleanupThreshold) {
-			delete(s.recentLines, key)
+	// Periodically clean up old entries (older than 2x dedup window).
+	// Running this on every call is O(n) per line; throttling to every 100 calls
+	// amortises the cost across the log stream.
+	if s.dedupCallCount%100 == 0 {
+		cleanupThreshold := now.Add(-2 * s.dedupWindow)
+		for key, timestamp := range s.recentLines {
+			if timestamp.Before(cleanupThreshold) {
+				delete(s.recentLines, key)
+			}
 		}
 	}
 
