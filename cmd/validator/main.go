@@ -552,7 +552,16 @@ func (n *ValidatorNode) setupHandlers() {
 			err = n.stateMachine.DisputeTicket(req.TicketID, validatorID)
 		}
 		if err != nil {
-			return err
+			// Idempotent errors (ticket already in target state) are non-fatal:
+			// they occur during log replay or concurrent consensus rounds.
+			if strings.Contains(err.Error(), "already validated") ||
+				strings.Contains(err.Error(), "already consumed") ||
+				strings.Contains(err.Error(), "already disputed") {
+				fmt.Printf("Consensus handler: idempotent op %s for ticket %s (skipping): %v\n",
+					req.Operation, req.TicketID, err)
+			} else {
+				return err
+			}
 		}
 		// Persist ticket to BoltDB so state survives node restarts
 		n.persistTicket(req.TicketID)
@@ -743,9 +752,13 @@ func (n *ValidatorNode) handleStateSyncRequest(payload []byte) error {
 	consensusLog := make([]string, 0)
 
 	for _, ticket := range validatedTickets {
+		// Skip non-consensus states up front to avoid unnecessary map lookup
+		if ticket.State == state.StateIssued || ticket.State == state.StatePending {
+			continue
+		}
 		protoState, ok := stateToProto[ticket.State]
-		if !ok || ticket.State == state.StateIssued || ticket.State == state.StatePending {
-			continue // Skip non-consensus states
+		if !ok {
+			continue
 		}
 		if ticket.State == state.StateValidated {
 			consensusLog = append(consensusLog, ticket.ID)
@@ -858,12 +871,10 @@ func (n *ValidatorNode) handleStateSyncResponse(payload []byte) error {
 // API interface implementation (for api.ValidatorInterface)
 
 func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
-	// Check if ticket is already validated (early rejection to avoid consensus overhead)
-	if n.stateMachine.HasTicket(ticketID) {
-		ticket, err := n.stateMachine.GetTicket(ticketID)
-		if err == nil && ticket != nil && ticket.State == state.StateValidated {
-			return fmt.Errorf("ticket %s already validated", ticketID)
-		}
+	// Check if ticket is already validated (early rejection to avoid consensus overhead).
+	// Single GetTicket call replaces the previous HasTicket + GetTicket double lookup.
+	if ticket, err := n.stateMachine.GetTicket(ticketID); err == nil && ticket != nil && ticket.State == state.StateValidated {
+		return fmt.Errorf("ticket %s already validated", ticketID)
 	}
 
 	// Create consensus request with unique ID for callback tracking
