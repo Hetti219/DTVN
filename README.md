@@ -179,7 +179,7 @@ The supervisor is a separate process that manages validator node subprocesses an
 
 - **Cluster startup is asynchronous**: `StartCluster()` returns immediately, starts nodes in the background, and sends progress via WebSocket `cluster_status` events.
 - **Ticket mutations route to the PRIMARY node only** via `getPrimaryNodeURL()`. Reads go to any running node. Seed operations go to ALL nodes.
-- **WebSocket writes are serialized** with a `wsWriteMu` mutex (gorilla/websocket is not thread-safe for concurrent writes).
+- **WebSocket writes are serialized** via a dedicated broadcast pump goroutine with a buffered channel (gorilla/websocket is not thread-safe for concurrent writes). Slow or dead clients are evicted automatically.
 
 ## Running a Validator Network Manually
 
@@ -538,7 +538,7 @@ Pushing a version tag (`v*`) triggers the release pipeline (`.github/workflows/r
 ```bash
 .
 ├── cmd/
-│   ├── validator/            # Validator node entry point (main.go -- 1313 lines)
+│   ├── validator/            # Validator node entry point
 │   ├── simulator/            # Network simulator entry point
 │   └── supervisor/           # Web dashboard entry point
 ├── pkg/
@@ -577,14 +577,14 @@ Pushing a version tag (`v*`) triggers the release pipeline (`.github/workflows/r
 
 | Metric              | Count            |
 | ------------------- | ---------------- |
-| Go source files     | 46               |
-| Go source lines     | ~11,600          |
-| Go test lines       | ~9,500           |
-| Functions + methods | 713              |
-| Structs             | 103              |
+| Go source files     | 30               |
+| Go source lines     | ~12,800          |
+| Go test lines       | ~8,300           |
+| Functions + methods | 585              |
+| Structs             | 102              |
 | Interfaces          | 4                |
 | JS files            | 9 (~2,950 lines) |
-| Protobuf messages   | 17 types         |
+| Protobuf messages   | 18 types         |
 
 ## Performance
 
