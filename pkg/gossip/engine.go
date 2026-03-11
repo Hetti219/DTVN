@@ -254,7 +254,7 @@ func (g *GossipEngine) performAntiEntropy() {
 	}
 
 	// Select a random peer
-	randomPeer := peers[rand.Intn(len(peers))]
+	randomPeer := peers[rand.Intn(len(peers))] // #nosec G404 -- non-cryptographic random used for peer selection
 
 	// Get message digests from cache
 	digests := g.cache.GetDigests()
@@ -402,7 +402,7 @@ func selectRandomPeers(peers []peer.ID, n int) []peer.ID {
 
 	// Partial Fisher-Yates: only shuffle the first n positions
 	for i := 0; i < n; i++ {
-		j := i + rand.Intn(len(shuffled)-i)
+		j := i + rand.Intn(len(shuffled)-i) // #nosec G404 -- non-cryptographic random used for Fisher-Yates shuffle
 		shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
 	}
 

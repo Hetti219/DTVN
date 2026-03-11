@@ -177,7 +177,7 @@ func (bf *BloomFilter) Contains(key string) bool {
 func (bf *BloomFilter) getHashes(key string) []int {
 	// Primary hash: FNV-1a 64-bit
 	h := fnv.New64a()
-	h.Write([]byte(key))
+	_, _ = h.Write([]byte(key))
 	sum := h.Sum64()
 
 	// Split into two 32-bit hashes for double hashing

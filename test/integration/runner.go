@@ -99,9 +99,9 @@ func (tr *TestRunner) runScenario(scenario TestScenario) TestResult {
 	}
 
 	defer func() {
-		cluster.Stop()
+		_ = cluster.Stop()
 		if result.Success {
-			cluster.Cleanup()
+			_ = cluster.Cleanup()
 		}
 	}()
 

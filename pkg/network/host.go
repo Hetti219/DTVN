@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
@@ -235,12 +236,9 @@ func (p *P2PHost) SendMessage(ctx context.Context, peerID peer.ID, data []byte) 
 	defer stream.Close()
 
 	// Write message length prefix (4 bytes)
-	msgLen := uint32(len(data))
+	msgLen := uint32(len(data)) // #nosec G115 -- slice length will not exceed uint32 bound
 	lenBuf := make([]byte, 4)
-	lenBuf[0] = byte(msgLen >> 24)
-	lenBuf[1] = byte(msgLen >> 16)
-	lenBuf[2] = byte(msgLen >> 8)
-	lenBuf[3] = byte(msgLen)
+	binary.BigEndian.PutUint32(lenBuf, msgLen)
 
 	if _, err := stream.Write(lenBuf); err != nil {
 		return fmt.Errorf("failed to write message length: %w", err)

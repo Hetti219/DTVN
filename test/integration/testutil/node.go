@@ -156,7 +156,7 @@ func (n *TestNode) Start(validatorBinary string) error {
 
 	// Start the process
 	if err := n.cmd.Start(); err != nil {
-		logFile.Close()
+		_ = logFile.Close()
 		return fmt.Errorf("failed to start node %s: %w", n.ID, err)
 	}
 
@@ -224,10 +224,10 @@ func (n *TestNode) Stop() error {
 
 	// Close log files
 	if n.stdout != nil {
-		n.stdout.Close()
+		_ = n.stdout.Close()
 	}
 	if n.stderr != nil {
-		n.stderr.Close()
+		_ = n.stderr.Close()
 	}
 
 	n.started = false

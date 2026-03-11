@@ -174,7 +174,7 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 		NodeID:        cfg.NodeID, // Enable deterministic peer ID
 	})
 	if err != nil {
-		store.Close()
+		_ = store.Close()
 		cancel()
 		return nil, fmt.Errorf("failed to initialize P2P host: %w", err)
 	}
@@ -218,8 +218,8 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 		IsBootstrap:    cfg.IsBootstrap,
 	})
 	if err != nil {
-		p2pHost.Close()
-		store.Close()
+		_ = p2pHost.Close()
+		_ = store.Close()
 		cancel()
 		return nil, fmt.Errorf("failed to initialize discovery: %w", err)
 	}
@@ -230,9 +230,9 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 		Fanout: 0, // Auto-calculate
 	}, p2pHost)
 	if err != nil {
-		discovery.Close()
-		p2pHost.Close()
-		store.Close()
+		_ = discovery.Close()
+		_ = p2pHost.Close()
+		_ = store.Close()
 		cancel()
 		return nil, fmt.Errorf("failed to initialize gossip engine: %w", err)
 	}
@@ -249,9 +249,9 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 		ViewTimeout: 15 * time.Second,
 	}, p2pHost)
 	if err != nil {
-		discovery.Close()
-		p2pHost.Close()
-		store.Close()
+		_ = discovery.Close()
+		_ = p2pHost.Close()
+		_ = store.Close()
 		cancel()
 		return nil, fmt.Errorf("failed to initialize PBFT: %w", err)
 	}
@@ -284,7 +284,7 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 		APIKey:     cfg.APIKey,
 	}, node)
 	if err != nil {
-		node.Stop()
+		_ = node.Stop()
 		return nil, fmt.Errorf("failed to initialize API server: %w", err)
 	}
 	node.apiServer = apiServer
@@ -381,32 +381,32 @@ func (n *ValidatorNode) Stop() error {
 
 	// Stop API server
 	if n.apiServer != nil {
-		n.apiServer.Close()
+		_ = n.apiServer.Close()
 	}
 
 	// Stop PBFT
 	if n.pbftNode != nil {
-		n.pbftNode.Close()
+		_ = n.pbftNode.Close()
 	}
 
 	// Stop gossip engine
 	if n.gossipEngine != nil {
-		n.gossipEngine.Close()
+		_ = n.gossipEngine.Close()
 	}
 
 	// Stop discovery
 	if n.discovery != nil {
-		n.discovery.Close()
+		_ = n.discovery.Close()
 	}
 
 	// Close P2P host
 	if n.p2pHost != nil {
-		n.p2pHost.Close()
+		_ = n.p2pHost.Close()
 	}
 
 	// Close storage
 	if n.storage != nil {
-		n.storage.Close()
+		_ = n.storage.Close()
 	}
 
 	return nil
@@ -440,7 +440,7 @@ func (n *ValidatorNode) performAntiEntropySync() {
 	}
 
 	// Pick a random peer for anti-entropy exchange
-	selectedPeer := peers[rand.Intn(len(peers))]
+	selectedPeer := peers[rand.Intn(len(peers))] // #nosec G404 -- non-cryptographic random used for peer selection
 
 	// Request state sync from the selected peer
 	n.requestStateSync(selectedPeer.ID)

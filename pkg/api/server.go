@@ -335,7 +335,7 @@ func (s *Server) handleGetStorageEntries(w http.ResponseWriter, r *http.Request)
 
 func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
 }
 
 // WebSocket handler
@@ -358,7 +358,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		s.wsMu.Lock()
 		delete(s.wsClients, conn)
 		s.wsMu.Unlock()
-		conn.Close()
+		_ = conn.Close()
 		fmt.Printf("WebSocket client disconnected: %s\n", conn.RemoteAddr())
 	}()
 
@@ -392,7 +392,7 @@ func (s *Server) broadcastLoop() {
 			for _, client := range clients {
 				if err := client.WriteJSON(msg); err != nil {
 					fmt.Printf("WebSocket write error: %v\n", err)
-					client.Close()
+					_ = client.Close()
 					s.wsMu.Lock()
 					delete(s.wsClients, client)
 					s.wsMu.Unlock()
@@ -499,7 +499,7 @@ func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
 func (s *Server) sendSuccess(w http.ResponseWriter, message string, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(Response{
+	_ = json.NewEncoder(w).Encode(Response{
 		Success: true,
 		Message: message,
 		Data:    data,
@@ -509,7 +509,7 @@ func (s *Server) sendSuccess(w http.ResponseWriter, message string, data interfa
 func (s *Server) sendError(w http.ResponseWriter, statusCode int, error string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
-	json.NewEncoder(w).Encode(Response{
+	_ = json.NewEncoder(w).Encode(Response{
 		Success: false,
 		Error:   error,
 	})

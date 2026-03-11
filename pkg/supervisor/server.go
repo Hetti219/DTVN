@@ -296,13 +296,13 @@ func (s *Server) Stop(ctx context.Context) error {
 
 	// Stop simulator if running
 	if s.simController.GetStatus() == SimulatorStatusRunning {
-		s.simController.Stop()
+		_ = s.simController.Stop()
 	}
 
 	// Close all WebSocket connections
 	s.wsMu.Lock()
 	for conn := range s.wsClients {
-		conn.Close()
+		_ = conn.Close()
 	}
 	s.wsClients = make(map[*websocket.Conn]bool)
 	s.wsMu.Unlock()
@@ -330,7 +330,7 @@ func (s *Server) wsBroadcastPump() {
 			var deadClients []*websocket.Conn
 			for _, conn := range clients {
 				// Set a write deadline so a slow client can't block the pump
-				conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 				if err := conn.WriteJSON(msg); err != nil {
 					deadClients = append(deadClients, conn)
 				}
@@ -341,7 +341,7 @@ func (s *Server) wsBroadcastPump() {
 				s.wsMu.Lock()
 				for _, conn := range deadClients {
 					delete(s.wsClients, conn)
-					conn.Close()
+					_ = conn.Close()
 				}
 				s.wsMu.Unlock()
 			}
@@ -672,7 +672,7 @@ func (s *Server) handleWSMessages(conn *websocket.Conn) {
 		s.wsMu.Lock()
 		delete(s.wsClients, conn)
 		s.wsMu.Unlock()
-		conn.Close()
+		_ = conn.Close()
 	}()
 
 	for {
@@ -694,13 +694,13 @@ func (s *Server) handleWSMessages(conn *websocket.Conn) {
 }
 
 func (s *Server) sendWSMessage(conn *websocket.Conn, msg map[string]interface{}) {
-	conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
 	if err := conn.WriteJSON(msg); err != nil {
 		// Remove dead client
 		s.wsMu.Lock()
 		delete(s.wsClients, conn)
 		s.wsMu.Unlock()
-		conn.Close()
+		_ = conn.Close()
 	}
 }
 
@@ -778,7 +778,7 @@ func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
 		if subtle.ConstantTimeCompare([]byte(key), []byte(s.apiKey)) != 1 {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
-			json.NewEncoder(w).Encode(map[string]string{
+			_ = json.NewEncoder(w).Encode(map[string]string{
 				"error": "Invalid or missing API key",
 			})
 			return
@@ -792,13 +792,13 @@ func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
 
 func (s *Server) writeJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	_ = json.NewEncoder(w).Encode(data)
 }
 
 func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"error": message,
 	})
 }

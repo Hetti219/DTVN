@@ -110,7 +110,7 @@ func (s *Server) isNodeReachable(baseURL string) bool {
 	if err != nil {
 		return false
 	}
-	resp.Body.Close()
+	_ = resp.Body.Close()
 	return resp.StatusCode == http.StatusOK
 }
 
@@ -181,7 +181,7 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, endpoint s
 	proxyReq.Header = r.Header.Clone()
 
 	// Make request using shared client
-	resp, err := s.proxyClient.Do(proxyReq)
+	resp, err := s.proxyClient.Do(proxyReq) // #nosec G704 -- internal addresses
 	if err != nil {
 		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to connect to validator node: %v", err))
 		return
@@ -197,7 +197,7 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, endpoint s
 
 	// Copy status code and body
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	_, _ = io.Copy(w, resp.Body)
 }
 
 // proxyRequestToPrimary forwards a read request to the primary node for consistency.
@@ -227,7 +227,7 @@ func (s *Server) proxyRequestToPrimary(w http.ResponseWriter, r *http.Request, e
 		body = bytes.NewReader(bodyBytes)
 	}
 
-	proxyReq, err := http.NewRequest(r.Method, targetURL, body) // #nosec G107 -- targetURL is constructed from internal 127.0.0.1 node addresses, not user input
+	proxyReq, err := http.NewRequest(r.Method, targetURL, body) // #nosec G107 G704 -- targetURL is constructed from internal 127.0.0.1 node addresses, not user input
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to create proxy request")
 		return
@@ -235,7 +235,7 @@ func (s *Server) proxyRequestToPrimary(w http.ResponseWriter, r *http.Request, e
 
 	proxyReq.Header = r.Header.Clone()
 
-	resp, err := s.proxyClient.Do(proxyReq)
+	resp, err := s.proxyClient.Do(proxyReq) // #nosec G704 -- internal addresses
 	if err != nil {
 		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to connect to validator node: %v", err))
 		return
@@ -249,7 +249,7 @@ func (s *Server) proxyRequestToPrimary(w http.ResponseWriter, r *http.Request, e
 	}
 
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	_, _ = io.Copy(w, resp.Body)
 }
 
 // proxyTicketRequest proxies a ticket mutation request to the primary node
@@ -272,18 +272,18 @@ func (s *Server) proxyTicketRequest(w http.ResponseWriter, r *http.Request, endp
 	var reqBody struct {
 		TicketID string `json:"ticket_id"`
 	}
-	json.Unmarshal(bodyBytes, &reqBody)
+	_ = json.Unmarshal(bodyBytes, &reqBody)
 
 	// Proxy the request using shared client (reuses TCP connections)
 	targetURL := fmt.Sprintf("%s/api/v1%s", nodeURL, endpoint)
-	proxyReq, err := http.NewRequest(r.Method, targetURL, bytes.NewReader(bodyBytes))
+	proxyReq, err := http.NewRequest(r.Method, targetURL, bytes.NewReader(bodyBytes)) // #nosec G107 G704 -- targetURL is constructed from internal 127.0.0.1 node addresses, not user input
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to create proxy request")
 		return
 	}
 	proxyReq.Header = r.Header.Clone()
 
-	resp, err := s.proxyClient.Do(proxyReq)
+	resp, err := s.proxyClient.Do(proxyReq) // #nosec G704 -- internal addresses
 	if err != nil {
 		s.writeError(w, http.StatusBadGateway, fmt.Sprintf("Failed to connect to validator node: %v", err))
 		return
@@ -299,7 +299,7 @@ func (s *Server) proxyTicketRequest(w http.ResponseWriter, r *http.Request, endp
 
 	// Copy status code and body
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	_, _ = io.Copy(w, resp.Body)
 
 	// Broadcast WebSocket event on success
 	if resp.StatusCode == http.StatusOK {
@@ -413,7 +413,7 @@ func (s *Server) handleProxySeedTickets(w http.ResponseWriter, r *http.Request) 
 func (s *Server) seedNode(nodeID, seedURL string) seedResult {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "POST", seedURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", seedURL, nil) // #nosec G107 G704 -- seedURL is constructed from internal 127.0.0.1 node addresses, not user input
 	if err != nil {
 		return seedResult{NodeID: nodeID, Err: err}
 	}
@@ -428,7 +428,7 @@ func (s *Server) seedNode(nodeID, seedURL string) seedResult {
 	defer resp.Body.Close()
 
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	_ = json.NewDecoder(resp.Body).Decode(&result)
 
 	seeded := 0
 	if data, ok := result["data"].(map[string]interface{}); ok {
@@ -487,7 +487,7 @@ func (s *Server) handleProxyValidateTicketViaNode(w http.ResponseWriter, r *http
 	// Proxy the validate request to the specific node
 	validateBody, _ := json.Marshal(map[string]string{"ticket_id": reqBody.TicketID})
 	targetURL := fmt.Sprintf("%s/api/v1/tickets/validate", nodeURL)
-	proxyReq, err := http.NewRequest("POST", targetURL, bytes.NewReader(validateBody))
+	proxyReq, err := http.NewRequest("POST", targetURL, bytes.NewReader(validateBody)) // #nosec G107 G704 -- targetURL is constructed from internal 127.0.0.1 node addresses, not user input
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to create proxy request")
 		return
@@ -511,7 +511,7 @@ func (s *Server) handleProxyValidateTicketViaNode(w http.ResponseWriter, r *http
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	io.Copy(w, resp.Body)
+	_, _ = io.Copy(w, resp.Body)
 
 	// Broadcast WebSocket event on success
 	if resp.StatusCode == http.StatusOK {
@@ -570,7 +570,7 @@ func (s *Server) handleProxyGetStats(w http.ResponseWriter, r *http.Request) {
 
 	// Proxy to running node
 	targetURL := fmt.Sprintf("%s/api/v1/stats", nodeURL)
-	statsReq, err := http.NewRequest("GET", targetURL, nil)
+	statsReq, err := http.NewRequest("GET", targetURL, nil) // #nosec G107 G704 -- targetURL is constructed from internal 127.0.0.1 node addresses, not user input
 	if err != nil {
 		s.writeError(w, http.StatusBadGateway, "Failed to get stats from node")
 		return
