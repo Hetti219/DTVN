@@ -111,7 +111,7 @@ export class WebSocketClient {
             try {
                 callback(data);
             } catch (error) {
-                console.error(`Error in ${eventType} listener:`, error);
+                console.error(`Error in ${String(eventType)} listener:`, error);
             }
         });
     }
