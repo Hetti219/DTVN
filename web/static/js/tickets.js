@@ -1,4 +1,11 @@
 // Ticket Management Interface
+
+// Escape HTML special characters to prevent XSS
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.appendChild(document.createTextNode(String(str)));
+    return div.innerHTML;
+}
 export class TicketManager {
     constructor(api, ws) {
         this.api = api;
@@ -137,10 +144,10 @@ export class TicketManager {
 
         try {
             await this.api.validateTicketViaNode(ticketID, nodeID);
-            resultDiv.innerHTML = `<span class="inline-feedback success">Ticket ${ticketID} validated via ${nodeID}</span>`;
+            resultDiv.innerHTML = `<span class="inline-feedback success">Ticket ${escapeHtml(ticketID)} validated via ${escapeHtml(nodeID)}</span>`;
             await this.loadTickets();
         } catch (error) {
-            resultDiv.innerHTML = `<span class="inline-feedback error">${error.message}</span>`;
+            resultDiv.innerHTML = `<span class="inline-feedback error">${escapeHtml(error.message)}</span>`;
         } finally {
             btn.disabled = false;
             btn.textContent = 'Validate';
@@ -158,10 +165,10 @@ export class TicketManager {
         try {
             const result = await this.api.seedTickets();
             const totalSeeded = result?.total_seeded ?? result?.seeded ?? 0;
-            resultSpan.innerHTML = `<span class="inline-feedback success">Seeded ${totalSeeded} tickets</span>`;
+            resultSpan.innerHTML = `<span class="inline-feedback success">Seeded ${escapeHtml(totalSeeded)} tickets</span>`;
             await this.loadTickets();
         } catch (error) {
-            resultSpan.innerHTML = `<span class="inline-feedback error">Error: ${error.message}</span>`;
+            resultSpan.innerHTML = `<span class="inline-feedback error">Error: ${escapeHtml(error.message)}</span>`;
         } finally {
             btn.disabled = false;
             btn.textContent = 'Seed 500 Tickets';
@@ -177,7 +184,7 @@ export class TicketManager {
         } catch (error) {
             console.error('Failed to load tickets:', error);
             document.getElementById('ticket-list').innerHTML = `
-                <div class="alert alert-error">Failed to load tickets: ${error.message}</div>
+                <div class="alert alert-error">Failed to load tickets: ${escapeHtml(error.message)}</div>
             `;
         }
     }
