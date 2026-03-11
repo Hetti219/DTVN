@@ -379,7 +379,7 @@ func (m *NodeManager) StopAllNodes() {
 	m.mu.RUnlock()
 
 	for _, id := range nodeIDs {
-		m.StopNode(id)
+		_ = m.StopNode(id)
 	}
 }
 

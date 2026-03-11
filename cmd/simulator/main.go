@@ -213,7 +213,7 @@ func (s *Simulator) Run() error {
 			consensusRound++
 
 			// Simulate network partition (occasionally)
-			if s.partitionEnabled && rand.Float64() < 0.05 {
+			if s.partitionEnabled && rand.Float64() < 0.05 { // #nosec G404 -- non-cryptographic random used for simulation logic
 				s.simulateNetworkPartition(nodes)
 			}
 
@@ -322,7 +322,7 @@ func (s *Simulator) broadcast(nodes []*SimulatedNode, msg SimulatedMessage) {
 		}
 
 		// Simulate packet loss
-		if rand.Float64() < s.packetLoss {
+		if rand.Float64() < s.packetLoss { // #nosec G404 -- non-cryptographic random used for simulation logic
 			continue
 		}
 
@@ -367,7 +367,7 @@ func (s *Simulator) handleNodeMessages(node *SimulatedNode, allNodes []*Simulate
 // handleByzantineNode handles Byzantine node behavior
 func (s *Simulator) handleByzantineNode(node *SimulatedNode, msg SimulatedMessage, allNodes []*SimulatedNode) {
 	// Byzantine behavior: send conflicting messages, delay responses, etc.
-	if rand.Float64() < 0.5 {
+	if rand.Float64() < 0.5 { // #nosec G404 -- non-cryptographic random used for simulation logic
 		// Send conflicting state
 		node.mu.Lock()
 		node.TicketState[msg.Payload.(string)] = "INVALID"
