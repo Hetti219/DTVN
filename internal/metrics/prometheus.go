@@ -3,6 +3,7 @@ package metrics
 import (
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -194,6 +195,13 @@ func Handler() http.Handler {
 
 // StartMetricsServer starts a metrics server on the specified address
 func StartMetricsServer(addr string) error {
-	http.Handle("/metrics", Handler())
-	return http.ListenAndServe(addr, nil)
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", Handler())
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		WriteTimeout:      30 * time.Second,
+	}
+	return server.ListenAndServe()
 }
