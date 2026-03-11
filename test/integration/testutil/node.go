@@ -81,11 +81,11 @@ func NewTestNode(cfg *NodeConfig) (*TestNode, error) {
 	dataDir := filepath.Join(cfg.DataDir, nodeID)
 
 	// Create directories
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
+	if err := os.MkdirAll(dataDir, 0750); err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to create data dir: %w", err)
 	}
-	if err := os.MkdirAll(cfg.LogsDir, 0755); err != nil {
+	if err := os.MkdirAll(cfg.LogsDir, 0750); err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to create logs dir: %w", err)
 	}
@@ -141,7 +141,7 @@ func (n *TestNode) Start(validatorBinary string) error {
 	// Note: Byzantine mode is simulated at test level, not by validator flag
 
 	// Create command
-	n.cmd = exec.CommandContext(n.ctx, validatorBinary, args...)
+	n.cmd = exec.CommandContext(n.ctx, validatorBinary, args...) // #nosec G204 -- validatorBinary is a trusted path from test configuration, not user input
 
 	// Setup logging
 	logFile, err := os.Create(n.LogFile)

@@ -63,7 +63,7 @@ func main() {
 	fmt.Println()
 
 	// Create data directory if it doesn't exist
-	if err := os.MkdirAll(*dataDir, 0755); err != nil {
+	if err := os.MkdirAll(*dataDir, 0750); err != nil {
 		fmt.Printf("ERROR: Failed to create data directory: %v\n", err)
 		os.Exit(1)
 	}
