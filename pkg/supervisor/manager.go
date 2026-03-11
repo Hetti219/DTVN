@@ -218,6 +218,7 @@ func (m *NodeManager) startNodeWithTotal(nodeID string, isPrimary bool, isBootst
 // startNodeProcess starts the actual validator process
 func (m *NodeManager) startNodeProcess(node *ManagedNode, bootstrapAddr string) {
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel() // Ensure context is cleaned up when process exits
 	node.mu.Lock()
 	node.cancelFunc = cancel
 	node.mu.Unlock()
@@ -244,7 +245,7 @@ func (m *NodeManager) startNodeProcess(node *ManagedNode, bootstrapAddr string) 
 	}
 
 	// Create command
-	cmd := exec.CommandContext(ctx, m.validatorPath, args...)
+	cmd := exec.CommandContext(ctx, m.validatorPath, args...) // #nosec G204 -- validatorPath is set from a trusted CLI flag, not user input
 	cmd.Dir = filepath.Dir(m.validatorPath)
 	if cmd.Dir == "" || cmd.Dir == "." {
 		// If validator path is relative, use current working directory
