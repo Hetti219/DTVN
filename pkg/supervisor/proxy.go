@@ -171,7 +171,7 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, endpoint s
 		body = bytes.NewReader(bodyBytes)
 	}
 
-	proxyReq, err := http.NewRequest(r.Method, targetURL, body)
+	proxyReq, err := http.NewRequest(r.Method, targetURL, body) // #nosec G107 -- targetURL is constructed from internal 127.0.0.1 node addresses, not user input
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to create proxy request")
 		return
@@ -227,7 +227,7 @@ func (s *Server) proxyRequestToPrimary(w http.ResponseWriter, r *http.Request, e
 		body = bytes.NewReader(bodyBytes)
 	}
 
-	proxyReq, err := http.NewRequest(r.Method, targetURL, body)
+	proxyReq, err := http.NewRequest(r.Method, targetURL, body) // #nosec G107 -- targetURL is constructed from internal 127.0.0.1 node addresses, not user input
 	if err != nil {
 		s.writeError(w, http.StatusInternalServerError, "Failed to create proxy request")
 		return

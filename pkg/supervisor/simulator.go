@@ -165,7 +165,7 @@ func (s *SimulatorController) runSimulator(config *SimulatorConfig) {
 	}
 
 	// Create command
-	cmd := exec.CommandContext(ctx, s.simulatorPath, args...)
+	cmd := exec.CommandContext(ctx, s.simulatorPath, args...) // #nosec G204 -- simulatorPath is set from a trusted CLI flag, not user input
 
 	// Capture stdout and stderr
 	stdout, err := cmd.StdoutPipe()

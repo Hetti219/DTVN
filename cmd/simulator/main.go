@@ -159,6 +159,7 @@ func NewSimulator(cfg *SimulatorConfig) *Simulator {
 
 // Run runs the simulation
 func (s *Simulator) Run() error {
+	defer s.cancel() // Ensure context is cleaned up when simulation ends
 	fmt.Println("Starting simulation...")
 
 	// Create nodes

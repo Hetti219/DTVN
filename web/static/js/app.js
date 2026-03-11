@@ -1,4 +1,11 @@
 // Main application entry point
+
+// Escape HTML special characters to prevent XSS
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.appendChild(document.createTextNode(String(str)));
+    return div.innerHTML;
+}
 import { API } from './api.js';
 import { WebSocketClient } from './websocket.js';
 import { Dashboard } from './dashboard.js';
@@ -128,7 +135,7 @@ class App {
             console.error(`Failed to load section ${section}:`, error);
             contentArea.innerHTML = `
                 <div class="alert alert-error">
-                    <strong>Error loading section:</strong> ${error.message}
+                    <strong>Error loading section:</strong> ${escapeHtml(error.message)}
                 </div>
             `;
         }
@@ -208,7 +215,7 @@ class App {
         toast.className = `toast ${type}`;
         toast.innerHTML = `
             <span class="toast-icon">${this.getToastIcon(type)}</span>
-            <span class="toast-message">${message}</span>
+            <span class="toast-message">${escapeHtml(message)}</span>
         `;
 
         container.appendChild(toast);
