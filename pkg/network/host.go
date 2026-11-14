@@ -72,7 +72,7 @@ func GenerateDeterministicKey(nodeID string) (crypto.PrivKey, error) {
 
 	salt := os.Getenv("DTVN_KEY_SEED")
 	if salt == "" {
-		salt = "dtvn-validator-key-v1" //only for testing
+		salt = "dtvn-validator-key-v1" // only for testing
 	}
 	seed := sha256.Sum256([]byte(salt + nodeID))
 
@@ -233,7 +233,11 @@ func (p *P2PHost) SendMessage(ctx context.Context, peerID peer.ID, data []byte) 
 	if err != nil {
 		return fmt.Errorf("failed to create stream to peer %s: %w", peerID, err)
 	}
-	defer stream.Close()
+	defer func() {
+		if err := stream.Close(); err != nil {
+			fmt.Printf("P2P: failed to close stream to peer %s: %v\n", peerID, err)
+		}
+	}()
 
 	// Write message length prefix (4 bytes)
 	msgLen := uint32(len(data)) // #nosec G115 -- slice length will not exceed uint32 bound
@@ -344,9 +348,13 @@ func (p *P2PHost) SetRouter(router *MessageRouter) {
 
 // handleStream handles incoming streams from peers
 func (p *P2PHost) handleStream(stream network.Stream) {
-	defer stream.Close()
-
 	peerID := stream.Conn().RemotePeer()
+
+	defer func() {
+		if err := stream.Close(); err != nil {
+			fmt.Printf("P2P: failed to close stream from peer %s: %v\n", peerID, err)
+		}
+	}()
 
 	// corrupted message length parsing and subsequent message routing failures
 	lenBuf := make([]byte, 4)

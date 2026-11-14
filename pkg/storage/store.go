@@ -69,7 +69,7 @@ func NewStore(cfg *Config) (*Store, error) {
 		timeout = 10 * time.Second
 	}
 
-	db, err := bbolt.Open(cfg.Path, 0600, &bbolt.Options{Timeout: timeout})
+	db, err := bbolt.Open(cfg.Path, 0o600, &bbolt.Options{Timeout: timeout})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -311,7 +311,7 @@ func (s *Store) GetMetadata(key string) ([]byte, error) {
 // Backup creates a backup of the database
 func (s *Store) Backup(path string) error {
 	return s.db.View(func(tx *bbolt.Tx) error {
-		return tx.CopyFile(path, 0600)
+		return tx.CopyFile(path, 0o600)
 	})
 }
 
@@ -361,7 +361,7 @@ func (s *Store) Close() error {
 // Compact performs database compaction (not directly supported by BoltDB)
 func (s *Store) Compact(newPath string) error {
 	// Create new database
-	newDB, err := bbolt.Open(newPath, 0600, &bbolt.Options{Timeout: 10 * time.Second})
+	newDB, err := bbolt.Open(newPath, 0o600, &bbolt.Options{Timeout: 10 * time.Second})
 	if err != nil {
 		return fmt.Errorf("failed to create new database: %w", err)
 	}
