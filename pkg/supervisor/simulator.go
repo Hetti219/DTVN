@@ -83,10 +83,10 @@ type SimulatorController struct {
 	resultCallback   func(results *SimulatorResults)
 
 	// Deduplication fields
-	dedupMu          sync.Mutex
-	recentLines      map[string]time.Time
-	dedupWindow      time.Duration
-	dedupCallCount   int // tracks calls to isDuplicateLine for periodic cleanup
+	dedupMu        sync.Mutex
+	recentLines    map[string]time.Time
+	dedupWindow    time.Duration
+	dedupCallCount int // tracks calls to isDuplicateLine for periodic cleanup
 }
 
 // SimulatorControllerConfig holds controller configuration
