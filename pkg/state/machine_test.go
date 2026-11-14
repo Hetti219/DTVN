@@ -90,7 +90,7 @@ func TestSeedTickets(t *testing.T) {
 	t.Run("SeedSkipsDuplicates", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		sm.IssueTicket("TICKET-001", []byte("existing"))
+		require.NoError(t, sm.IssueTicket("TICKET-001", []byte("existing")))
 
 		tickets := []*Ticket{
 			{ID: "TICKET-001", State: StateIssued, Data: []byte("dup"), Timestamp: time.Now().Unix(), Metadata: map[string]string{}},
@@ -109,7 +109,7 @@ func TestValidateTicket(t *testing.T) {
 	t.Run("ValidateIssuedTicket", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		sm.IssueTicket("ticket-001", []byte("test-data"))
+		require.NoError(t, sm.IssueTicket("ticket-001", []byte("test-data")))
 		err := sm.ValidateTicket("ticket-001", "validator-1", []byte("test-data"))
 		require.NoError(t, err)
 
@@ -132,7 +132,7 @@ func TestValidateTicket(t *testing.T) {
 
 		for i := 1; i <= 5; i++ {
 			ticketID := "ticket-" + string(rune('0'+i))
-			sm.IssueTicket(ticketID, []byte("test"))
+			require.NoError(t, sm.IssueTicket(ticketID, []byte("test")))
 			err := sm.ValidateTicket(ticketID, "validator-1", []byte("test"))
 			require.NoError(t, err)
 		}
@@ -144,7 +144,7 @@ func TestValidateTicket(t *testing.T) {
 	t.Run("CannotValidateTwice", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		sm.IssueTicket("ticket-double", []byte("test"))
+		require.NoError(t, sm.IssueTicket("ticket-double", []byte("test")))
 		err := sm.ValidateTicket("ticket-double", "validator-1", []byte("test"))
 		require.NoError(t, err)
 
@@ -158,9 +158,9 @@ func TestValidateTicket(t *testing.T) {
 		sm := NewStateMachine("node1")
 
 		// Issue, validate, then consume
-		sm.IssueTicket("ticket-consumed", []byte("test"))
-		sm.ValidateTicket("ticket-consumed", "validator-1", []byte("test"))
-		sm.ConsumeTicket("ticket-consumed", "validator-1")
+		require.NoError(t, sm.IssueTicket("ticket-consumed", []byte("test")))
+		require.NoError(t, sm.ValidateTicket("ticket-consumed", "validator-1", []byte("test")))
+		require.NoError(t, sm.ConsumeTicket("ticket-consumed", "validator-1"))
 
 		// Try to validate consumed ticket
 		err := sm.ValidateTicket("ticket-consumed", "validator-1", []byte("test"))
@@ -171,9 +171,9 @@ func TestValidateTicket(t *testing.T) {
 	t.Run("CannotValidateDisputedTicket", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		sm.IssueTicket("ticket-disputed", []byte("test"))
-		sm.ValidateTicket("ticket-disputed", "validator-1", []byte("test"))
-		sm.DisputeTicket("ticket-disputed", "validator-1")
+		require.NoError(t, sm.IssueTicket("ticket-disputed", []byte("test")))
+		require.NoError(t, sm.ValidateTicket("ticket-disputed", "validator-1", []byte("test")))
+		require.NoError(t, sm.DisputeTicket("ticket-disputed", "validator-1"))
 
 		// Try to validate disputed ticket
 		err := sm.ValidateTicket("ticket-disputed", "validator-1", []byte("test"))
@@ -186,18 +186,19 @@ func TestValidateTicket(t *testing.T) {
 
 		initialClock := sm.GetVectorClock().Get("node1")
 
-		sm.IssueTicket("ticket-clock", []byte("test"))
+		require.NoError(t, sm.IssueTicket("ticket-clock", []byte("test")))
 		err := sm.ValidateTicket("ticket-clock", "validator-1", []byte("test"))
 		require.NoError(t, err)
 
-		ticket, _ := sm.GetTicket("ticket-clock")
+		ticket, err := sm.GetTicket("ticket-clock")
+		require.NoError(t, err)
 		assert.Greater(t, ticket.VectorClock.Get("node1"), initialClock)
 	})
 
 	t.Run("ValidateRecordsTransition", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		sm.IssueTicket("ticket-transition", []byte("test"))
+		require.NoError(t, sm.IssueTicket("ticket-transition", []byte("test")))
 		err := sm.ValidateTicket("ticket-transition", "validator-1", []byte("test"))
 		require.NoError(t, err)
 
@@ -214,7 +215,7 @@ func TestConsumeTicket(t *testing.T) {
 	t.Run("ConsumeValidatedTicket", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		issueAndValidate(sm, "ticket-consume", "validator-1", []byte("test"))
+		require.NoError(t, issueAndValidate(sm, "ticket-consume", "validator-1", []byte("test")))
 
 		err := sm.ConsumeTicket("ticket-consume", "validator-1")
 		require.NoError(t, err)
@@ -236,7 +237,7 @@ func TestConsumeTicket(t *testing.T) {
 		sm := NewStateMachine("node1")
 
 		// Issue ticket but don't validate it
-		sm.IssueTicket("ticket-issued-only", []byte("test"))
+		require.NoError(t, sm.IssueTicket("ticket-issued-only", []byte("test")))
 
 		err := sm.ConsumeTicket("ticket-issued-only", "validator-1")
 		assert.Error(t, err)
@@ -246,14 +247,16 @@ func TestConsumeTicket(t *testing.T) {
 	t.Run("ConsumeUpdatesVectorClock", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		issueAndValidate(sm, "ticket-consume-clock", "validator-1", []byte("test"))
+		require.NoError(t, issueAndValidate(sm, "ticket-consume-clock", "validator-1", []byte("test")))
 
-		ticket1, _ := sm.GetTicket("ticket-consume-clock")
+		ticket1, err := sm.GetTicket("ticket-consume-clock")
+		require.NoError(t, err)
 		clockBefore := ticket1.VectorClock.Get("node1")
 
-		sm.ConsumeTicket("ticket-consume-clock", "validator-1")
+		require.NoError(t, sm.ConsumeTicket("ticket-consume-clock", "validator-1"))
 
-		ticket2, _ := sm.GetTicket("ticket-consume-clock")
+		ticket2, err := sm.GetTicket("ticket-consume-clock")
+		require.NoError(t, err)
 		assert.Greater(t, ticket2.VectorClock.Get("node1"), clockBefore)
 	})
 }
@@ -263,7 +266,7 @@ func TestDisputeTicket(t *testing.T) {
 	t.Run("DisputeExistingTicket", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		issueAndValidate(sm, "ticket-dispute", "validator-1", []byte("test"))
+		require.NoError(t, issueAndValidate(sm, "ticket-dispute", "validator-1", []byte("test")))
 
 		err := sm.DisputeTicket("ticket-dispute", "validator-1")
 		require.NoError(t, err)
@@ -284,14 +287,16 @@ func TestDisputeTicket(t *testing.T) {
 	t.Run("DisputeUpdatesVectorClock", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		issueAndValidate(sm, "ticket-dispute-clock", "validator-1", []byte("test"))
+		require.NoError(t, issueAndValidate(sm, "ticket-dispute-clock", "validator-1", []byte("test")))
 
-		ticket1, _ := sm.GetTicket("ticket-dispute-clock")
+		ticket1, err := sm.GetTicket("ticket-dispute-clock")
+		require.NoError(t, err)
 		clockBefore := ticket1.VectorClock.Get("node1")
 
-		sm.DisputeTicket("ticket-dispute-clock", "validator-1")
+		require.NoError(t, sm.DisputeTicket("ticket-dispute-clock", "validator-1"))
 
-		ticket2, _ := sm.GetTicket("ticket-dispute-clock")
+		ticket2, err := sm.GetTicket("ticket-dispute-clock")
+		require.NoError(t, err)
 		assert.Greater(t, ticket2.VectorClock.Get("node1"), clockBefore)
 	})
 }
@@ -301,7 +306,7 @@ func TestGetTicket(t *testing.T) {
 	t.Run("GetExistingTicket", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		issueAndValidate(sm, "ticket-get", "validator-1", []byte("test-data"))
+		require.NoError(t, issueAndValidate(sm, "ticket-get", "validator-1", []byte("test-data")))
 
 		ticket, err := sm.GetTicket("ticket-get")
 		require.NoError(t, err)
@@ -319,13 +324,15 @@ func TestGetTicket(t *testing.T) {
 	t.Run("GetReturnsACopy", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		issueAndValidate(sm, "ticket-copy", "validator-1", []byte("test"))
+		require.NoError(t, issueAndValidate(sm, "ticket-copy", "validator-1", []byte("test")))
 
-		ticket, _ := sm.GetTicket("ticket-copy")
+		ticket, err := sm.GetTicket("ticket-copy")
+		require.NoError(t, err)
 		ticket.State = StateConsumed // Modify the copy
 
 		// Original should not be affected
-		ticket2, _ := sm.GetTicket("ticket-copy")
+		ticket2, err := sm.GetTicket("ticket-copy")
+		require.NoError(t, err)
 		assert.Equal(t, StateValidated, ticket2.State)
 	})
 }
@@ -335,9 +342,9 @@ func TestGetAllTickets(t *testing.T) {
 	t.Run("GetAllTickets", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		issueAndValidate(sm, "ticket-1", "validator-1", []byte("test1"))
-		issueAndValidate(sm, "ticket-2", "validator-1", []byte("test2"))
-		issueAndValidate(sm, "ticket-3", "validator-1", []byte("test3"))
+		require.NoError(t, issueAndValidate(sm, "ticket-1", "validator-1", []byte("test1")))
+		require.NoError(t, issueAndValidate(sm, "ticket-2", "validator-1", []byte("test2")))
+		require.NoError(t, issueAndValidate(sm, "ticket-3", "validator-1", []byte("test3")))
 
 		tickets := sm.GetAllTickets()
 		assert.Len(t, tickets, 3)
@@ -356,7 +363,7 @@ func TestHasTicket(t *testing.T) {
 	t.Run("HasExistingTicket", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		sm.IssueTicket("ticket-exists", []byte("test"))
+		require.NoError(t, sm.IssueTicket("ticket-exists", []byte("test")))
 
 		assert.True(t, sm.HasTicket("ticket-exists"))
 		assert.False(t, sm.HasTicket("non-existent"))
@@ -374,8 +381,8 @@ func TestStateChangeHandlers(t *testing.T) {
 			return nil
 		})
 
-		sm.IssueTicket("ticket-handler", []byte("test"))
-		sm.ValidateTicket("ticket-handler", "validator-1", []byte("test"))
+		require.NoError(t, sm.IssueTicket("ticket-handler", []byte("test")))
+		require.NoError(t, sm.ValidateTicket("ticket-handler", "validator-1", []byte("test")))
 		assert.True(t, called)
 	})
 
@@ -390,8 +397,8 @@ func TestStateChangeHandlers(t *testing.T) {
 			})
 		}
 
-		sm.IssueTicket("ticket-multi-handler", []byte("test"))
-		sm.ValidateTicket("ticket-multi-handler", "validator-1", []byte("test"))
+		require.NoError(t, sm.IssueTicket("ticket-multi-handler", []byte("test")))
+		require.NoError(t, sm.ValidateTicket("ticket-multi-handler", "validator-1", []byte("test")))
 		assert.Equal(t, 3, callCount)
 	})
 
@@ -405,8 +412,8 @@ func TestStateChangeHandlers(t *testing.T) {
 			return nil
 		})
 
-		sm.IssueTicket("ticket-states", []byte("test"))
-		sm.ValidateTicket("ticket-states", "validator-1", []byte("test"))
+		require.NoError(t, sm.IssueTicket("ticket-states", []byte("test")))
+		require.NoError(t, sm.ValidateTicket("ticket-states", "validator-1", []byte("test")))
 
 		assert.Equal(t, StateIssued, capturedOldState)
 		assert.Equal(t, StateValidated, capturedNewState)
@@ -419,7 +426,7 @@ func TestMergeState(t *testing.T) {
 		sm1 := NewStateMachine("node1")
 		sm2 := NewStateMachine("node2")
 
-		issueAndValidate(sm2, "ticket-remote", "validator-2", []byte("test"))
+		require.NoError(t, issueAndValidate(sm2, "ticket-remote", "validator-2", []byte("test")))
 
 		remoteTickets := sm2.GetAllTickets()
 		err := sm1.MergeState(remoteTickets)
@@ -433,12 +440,13 @@ func TestMergeState(t *testing.T) {
 		sm2 := NewStateMachine("node2")
 
 		// Both create same ticket
-		issueAndValidate(sm1, "ticket-conflict", "validator-1", []byte("test"))
+		require.NoError(t, issueAndValidate(sm1, "ticket-conflict", "validator-1", []byte("test")))
 		time.Sleep(10 * time.Millisecond)
-		issueAndValidate(sm2, "ticket-conflict", "validator-2", []byte("test"))
+		require.NoError(t, issueAndValidate(sm2, "ticket-conflict", "validator-2", []byte("test")))
 
 		// sm2 has newer timestamp
-		ticket2, _ := sm2.GetTicket("ticket-conflict")
+		ticket2, err := sm2.GetTicket("ticket-conflict")
+		require.NoError(t, err)
 		ticket2.Timestamp = time.Now().Unix() + 1000
 
 		sm2.mu.Lock()
@@ -446,11 +454,12 @@ func TestMergeState(t *testing.T) {
 		sm2.mu.Unlock()
 
 		remoteTickets := sm2.GetAllTickets()
-		err := sm1.MergeState(remoteTickets)
+		err = sm1.MergeState(remoteTickets)
 		require.NoError(t, err)
 
 		// Should adopt newer state
-		ticket1, _ := sm1.GetTicket("ticket-conflict")
+		ticket1, err := sm1.GetTicket("ticket-conflict")
+		require.NoError(t, err)
 		assert.Equal(t, "validator-2", ticket1.ValidatorID)
 	})
 
@@ -458,7 +467,7 @@ func TestMergeState(t *testing.T) {
 		sm1 := NewStateMachine("node1")
 		sm2 := NewStateMachine("node2")
 
-		issueAndValidate(sm1, "ticket-newer", "validator-1", []byte("test"))
+		require.NoError(t, issueAndValidate(sm1, "ticket-newer", "validator-1", []byte("test")))
 		time.Sleep(10 * time.Millisecond)
 
 		// Create older version in sm2
@@ -477,7 +486,8 @@ func TestMergeState(t *testing.T) {
 		require.NoError(t, err)
 
 		// Should keep newer local state
-		ticket1, _ := sm1.GetTicket("ticket-newer")
+		ticket1, err := sm1.GetTicket("ticket-newer")
+		require.NoError(t, err)
 		assert.Equal(t, "validator-1", ticket1.ValidatorID)
 	})
 }
@@ -500,7 +510,7 @@ func TestSyncTicket(t *testing.T) {
 	t.Run("CannotSyncExistingTicket", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		sm.IssueTicket("ticket-exists", []byte("test"))
+		require.NoError(t, sm.IssueTicket("ticket-exists", []byte("test")))
 
 		err := sm.SyncTicket("ticket-exists", "validator-remote", []byte("test"))
 		assert.Error(t, err)
@@ -525,8 +535,8 @@ func TestVectorClockIntegration(t *testing.T) {
 
 		initialClock := sm.GetVectorClock().Get("node1")
 
-		sm.IssueTicket("ticket-vc1", []byte("test"))
-		sm.ValidateTicket("ticket-vc1", "validator-1", []byte("test"))
+		require.NoError(t, sm.IssueTicket("ticket-vc1", []byte("test")))
+		require.NoError(t, sm.ValidateTicket("ticket-vc1", "validator-1", []byte("test")))
 
 		currentClock := sm.GetVectorClock().Get("node1")
 		assert.Greater(t, currentClock, initialClock)
@@ -535,10 +545,10 @@ func TestVectorClockIntegration(t *testing.T) {
 	t.Run("VectorClockIncrementsOnConsume", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		issueAndValidate(sm, "ticket-vc2", "validator-1", []byte("test"))
+		require.NoError(t, issueAndValidate(sm, "ticket-vc2", "validator-1", []byte("test")))
 		clockAfterValidate := sm.GetVectorClock().Get("node1")
 
-		sm.ConsumeTicket("ticket-vc2", "validator-1")
+		require.NoError(t, sm.ConsumeTicket("ticket-vc2", "validator-1"))
 		clockAfterConsume := sm.GetVectorClock().Get("node1")
 
 		assert.Greater(t, clockAfterConsume, clockAfterValidate)
@@ -547,10 +557,10 @@ func TestVectorClockIntegration(t *testing.T) {
 	t.Run("VectorClockIncrementsOnDispute", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		issueAndValidate(sm, "ticket-vc3", "validator-1", []byte("test"))
+		require.NoError(t, issueAndValidate(sm, "ticket-vc3", "validator-1", []byte("test")))
 		clockAfterValidate := sm.GetVectorClock().Get("node1")
 
-		sm.DisputeTicket("ticket-vc3", "validator-1")
+		require.NoError(t, sm.DisputeTicket("ticket-vc3", "validator-1"))
 		clockAfterDispute := sm.GetVectorClock().Get("node1")
 
 		assert.Greater(t, clockAfterDispute, clockAfterValidate)
@@ -565,7 +575,7 @@ func TestStateMachineConcurrentOperations(t *testing.T) {
 		// Pre-issue all tickets
 		for i := 0; i < 10; i++ {
 			ticketID := "concurrent-" + string(rune('0'+i))
-			sm.IssueTicket(ticketID, []byte("test"))
+			require.NoError(t, sm.IssueTicket(ticketID, []byte("test")))
 		}
 
 		done := make(chan bool)
@@ -589,7 +599,7 @@ func TestStateMachineConcurrentOperations(t *testing.T) {
 	t.Run("ConcurrentReads", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		issueAndValidate(sm, "shared-ticket", "validator-1", []byte("test"))
+		require.NoError(t, issueAndValidate(sm, "shared-ticket", "validator-1", []byte("test")))
 
 		var wg sync.WaitGroup
 		wg.Add(20)
@@ -636,8 +646,8 @@ func TestStateTransitions(t *testing.T) {
 	t.Run("RecordsAllTransitions", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		issueAndValidate(sm, "ticket-trans", "validator-1", []byte("test"))
-		sm.ConsumeTicket("ticket-trans", "validator-1")
+		require.NoError(t, issueAndValidate(sm, "ticket-trans", "validator-1", []byte("test")))
+		require.NoError(t, sm.ConsumeTicket("ticket-trans", "validator-1"))
 
 		transitions := sm.GetTransitions()
 		assert.Len(t, transitions, 2)
@@ -652,7 +662,7 @@ func TestStateTransitions(t *testing.T) {
 	t.Run("TransitionsIncludeVectorClock", func(t *testing.T) {
 		sm := NewStateMachine("node1")
 
-		issueAndValidate(sm, "ticket-trans-vc", "validator-1", []byte("test"))
+		require.NoError(t, issueAndValidate(sm, "ticket-trans-vc", "validator-1", []byte("test")))
 
 		transitions := sm.GetTransitions()
 		assert.Len(t, transitions, 1)
@@ -671,8 +681,8 @@ func TestPublisher(t *testing.T) {
 			return nil
 		})
 
-		sm.IssueTicket("ticket-publish", []byte("test"))
-		sm.ValidateTicket("ticket-publish", "validator-1", []byte("test"))
+		require.NoError(t, sm.IssueTicket("ticket-publish", []byte("test")))
+		require.NoError(t, sm.ValidateTicket("ticket-publish", "validator-1", []byte("test")))
 
 		// Give goroutine time to execute
 		time.Sleep(50 * time.Millisecond)

@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/boltdb/bolt"
+	"go.etcd.io/bbolt"
 )
 
 var (
@@ -22,7 +22,7 @@ var (
 
 // Store handles persistent storage using BoltDB
 type Store struct {
-	db   *bolt.DB
+	db   *bbolt.DB
 	path string
 }
 
@@ -69,13 +69,13 @@ func NewStore(cfg *Config) (*Store, error) {
 		timeout = 10 * time.Second
 	}
 
-	db, err := bolt.Open(cfg.Path, 0600, &bolt.Options{Timeout: timeout})
+	db, err := bbolt.Open(cfg.Path, 0o600, &bbolt.Options{Timeout: timeout})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	// Create buckets
-	err = db.Update(func(tx *bolt.Tx) error {
+	err = db.Update(func(tx *bbolt.Tx) error {
 		buckets := [][]byte{BucketTickets, BucketConsensus, BucketCheckpoints, BucketMetadata}
 		for _, bucket := range buckets {
 			if _, err := tx.CreateBucketIfNotExists(bucket); err != nil {
@@ -97,7 +97,7 @@ func NewStore(cfg *Config) (*Store, error) {
 
 // SaveTicket saves a ticket to the database
 func (s *Store) SaveTicket(ticket *TicketRecord) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(BucketTickets)
 		if b == nil {
 			return fmt.Errorf("bucket %s not found", BucketTickets)
@@ -116,7 +116,7 @@ func (s *Store) SaveTicket(ticket *TicketRecord) error {
 func (s *Store) GetTicket(ticketID string) (*TicketRecord, error) {
 	var ticket *TicketRecord
 
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(BucketTickets)
 		if b == nil {
 			return fmt.Errorf("bucket %s not found", BucketTickets)
@@ -138,7 +138,7 @@ func (s *Store) GetTicket(ticketID string) (*TicketRecord, error) {
 func (s *Store) GetAllTickets() ([]*TicketRecord, error) {
 	var tickets []*TicketRecord
 
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(BucketTickets)
 		if b == nil {
 			return fmt.Errorf("bucket %s not found", BucketTickets)
@@ -162,7 +162,7 @@ func (s *Store) GetAllTickets() ([]*TicketRecord, error) {
 
 // DeleteTicket deletes a ticket from the database
 func (s *Store) DeleteTicket(ticketID string) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(BucketTickets)
 		if b == nil {
 			return fmt.Errorf("bucket %s not found", BucketTickets)
@@ -173,7 +173,7 @@ func (s *Store) DeleteTicket(ticketID string) error {
 
 // SaveConsensusLog saves a consensus log entry
 func (s *Store) SaveConsensusLog(record *ConsensusRecord) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(BucketConsensus)
 		if b == nil {
 			return fmt.Errorf("bucket %s not found", BucketConsensus)
@@ -193,7 +193,7 @@ func (s *Store) SaveConsensusLog(record *ConsensusRecord) error {
 func (s *Store) GetConsensusLog(sequence int64) (*ConsensusRecord, error) {
 	var record *ConsensusRecord
 
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(BucketConsensus)
 		if b == nil {
 			return fmt.Errorf("bucket %s not found", BucketConsensus)
@@ -215,7 +215,7 @@ func (s *Store) GetConsensusLog(sequence int64) (*ConsensusRecord, error) {
 func (s *Store) GetConsensusLogs() ([]*ConsensusRecord, error) {
 	var logs []*ConsensusRecord
 
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(BucketConsensus)
 		if b == nil {
 			return fmt.Errorf("bucket %s not found", BucketConsensus)
@@ -236,7 +236,7 @@ func (s *Store) GetConsensusLogs() ([]*ConsensusRecord, error) {
 
 // SaveCheckpoint saves a checkpoint
 func (s *Store) SaveCheckpoint(checkpoint *CheckpointRecord) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(BucketCheckpoints)
 		if b == nil {
 			return fmt.Errorf("bucket %s not found", BucketCheckpoints)
@@ -255,7 +255,7 @@ func (s *Store) SaveCheckpoint(checkpoint *CheckpointRecord) error {
 func (s *Store) GetLatestCheckpoint() (*CheckpointRecord, error) {
 	var checkpoint *CheckpointRecord
 
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(BucketCheckpoints)
 		if b == nil {
 			return fmt.Errorf("bucket %s not found", BucketCheckpoints)
@@ -276,7 +276,7 @@ func (s *Store) GetLatestCheckpoint() (*CheckpointRecord, error) {
 
 // SetMetadata stores a metadata key-value pair
 func (s *Store) SetMetadata(key string, value []byte) error {
-	return s.db.Update(func(tx *bolt.Tx) error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(BucketMetadata)
 		if b == nil {
 			return fmt.Errorf("bucket %s not found", BucketMetadata)
@@ -289,7 +289,7 @@ func (s *Store) SetMetadata(key string, value []byte) error {
 func (s *Store) GetMetadata(key string) ([]byte, error) {
 	var value []byte
 
-	err := s.db.View(func(tx *bolt.Tx) error {
+	err := s.db.View(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(BucketMetadata)
 		if b == nil {
 			return fmt.Errorf("bucket %s not found", BucketMetadata)
@@ -310,8 +310,8 @@ func (s *Store) GetMetadata(key string) ([]byte, error) {
 
 // Backup creates a backup of the database
 func (s *Store) Backup(path string) error {
-	return s.db.View(func(tx *bolt.Tx) error {
-		return tx.CopyFile(path, 0600)
+	return s.db.View(func(tx *bbolt.Tx) error {
+		return tx.CopyFile(path, 0o600)
 	})
 }
 
@@ -361,16 +361,16 @@ func (s *Store) Close() error {
 // Compact performs database compaction (not directly supported by BoltDB)
 func (s *Store) Compact(newPath string) error {
 	// Create new database
-	newDB, err := bolt.Open(newPath, 0600, &bolt.Options{Timeout: 10 * time.Second})
+	newDB, err := bbolt.Open(newPath, 0o600, &bbolt.Options{Timeout: 10 * time.Second})
 	if err != nil {
 		return fmt.Errorf("failed to create new database: %w", err)
 	}
 	defer newDB.Close()
 
 	// Copy all buckets
-	return s.db.View(func(tx *bolt.Tx) error {
-		return newDB.Update(func(newTx *bolt.Tx) error {
-			return tx.ForEach(func(name []byte, b *bolt.Bucket) error {
+	return s.db.View(func(tx *bbolt.Tx) error {
+		return newDB.Update(func(newTx *bbolt.Tx) error {
+			return tx.ForEach(func(name []byte, b *bbolt.Bucket) error {
 				newBucket, err := newTx.CreateBucketIfNotExists(name)
 				if err != nil {
 					return err

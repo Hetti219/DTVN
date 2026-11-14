@@ -26,8 +26,10 @@ func TestGenerateDeterministicKey(t *testing.T) {
 		require.NotNil(t, key2)
 
 		// Keys should be equal
-		bytes1, _ := crypto.MarshalPrivateKey(key1)
-		bytes2, _ := crypto.MarshalPrivateKey(key2)
+		bytes1, err := crypto.MarshalPrivateKey(key1)
+		require.NoError(t, err)
+		bytes2, err := crypto.MarshalPrivateKey(key2)
+		require.NoError(t, err)
 		assert.Equal(t, bytes1, bytes2)
 	})
 
@@ -39,8 +41,10 @@ func TestGenerateDeterministicKey(t *testing.T) {
 		require.NoError(t, err)
 
 		// Keys should be different
-		bytes1, _ := crypto.MarshalPrivateKey(key1)
-		bytes2, _ := crypto.MarshalPrivateKey(key2)
+		bytes1, err := crypto.MarshalPrivateKey(key1)
+		require.NoError(t, err)
+		bytes2, err := crypto.MarshalPrivateKey(key2)
+		require.NoError(t, err)
 		assert.NotEqual(t, bytes1, bytes2)
 	})
 
@@ -53,11 +57,15 @@ func TestGenerateDeterministicKey(t *testing.T) {
 	t.Run("SamePeerIDFromSameNodeID", func(t *testing.T) {
 		nodeID := "test-node"
 
-		key1, _ := GenerateDeterministicKey(nodeID)
-		peerID1, _ := peer.IDFromPrivateKey(key1)
+		key1, err := GenerateDeterministicKey(nodeID)
+		require.NoError(t, err)
+		peerID1, err := peer.IDFromPrivateKey(key1)
+		require.NoError(t, err)
 
-		key2, _ := GenerateDeterministicKey(nodeID)
-		peerID2, _ := peer.IDFromPrivateKey(key2)
+		key2, err := GenerateDeterministicKey(nodeID)
+		require.NoError(t, err)
+		peerID2, err := peer.IDFromPrivateKey(key2)
+		require.NoError(t, err)
 
 		assert.Equal(t, peerID1, peerID2)
 	})
@@ -109,8 +117,10 @@ func TestDeterministicReader(t *testing.T) {
 		buf1 := make([]byte, 32)
 		buf2 := make([]byte, 32)
 
-		reader.Read(buf1)
-		reader.Read(buf2)
+		_, err1 := reader.Read(buf1)
+		require.NoError(t, err1)
+		_, err2 := reader.Read(buf2)
+		require.NoError(t, err2)
 
 		// Consecutive reads should produce different data
 		assert.NotEqual(t, buf1, buf2)
@@ -153,7 +163,8 @@ func TestNewP2PHost(t *testing.T) {
 		defer host.Close()
 
 		// Verify the host is using the provided key
-		peerID, _ := peer.IDFromPrivateKey(privKey)
+		peerID, err := peer.IDFromPrivateKey(privKey)
+		require.NoError(t, err)
 		assert.Equal(t, peerID, host.ID())
 	})
 
@@ -444,10 +455,12 @@ func TestPeerConnection(t *testing.T) {
 	t.Run("GetConnectedPeers", func(t *testing.T) {
 		ctx := context.Background()
 
-		host1, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "peer-info-1"})
+		host1, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "peer-info-1"})
+		require.NoError(t, err)
 		defer host1.Close()
 
-		host2, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "peer-info-2"})
+		host2, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "peer-info-2"})
+		require.NoError(t, err)
 		defer host2.Close()
 
 		// Connect
@@ -455,7 +468,7 @@ func TestPeerConnection(t *testing.T) {
 			ID:    host1.ID(),
 			Addrs: host1.Addrs(),
 		}
-		host2.Connect(ctx, peerInfo)
+		require.NoError(t, host2.Connect(ctx, peerInfo))
 
 		time.Sleep(100 * time.Millisecond)
 
@@ -473,10 +486,12 @@ func TestMessageSending(t *testing.T) {
 		ctx := context.Background()
 
 		// Create hosts
-		host1, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "sender"})
+		host1, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "sender"})
+		require.NoError(t, err)
 		defer host1.Close()
 
-		host2, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "receiver"})
+		host2, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "receiver"})
+		require.NoError(t, err)
 		defer host2.Close()
 
 		// Setup message receiver
@@ -491,7 +506,7 @@ func TestMessageSending(t *testing.T) {
 			ID:    host2.ID(),
 			Addrs: host2.Addrs(),
 		}
-		err := host1.Connect(ctx, peerInfo)
+		err = host1.Connect(ctx, peerInfo)
 		require.NoError(t, err)
 
 		time.Sleep(100 * time.Millisecond)
@@ -513,14 +528,17 @@ func TestMessageSending(t *testing.T) {
 	t.Run("SendToNonExistentPeer", func(t *testing.T) {
 		ctx := context.Background()
 
-		host, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "lonely-host"})
+		host, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "lonely-host"})
+		require.NoError(t, err)
 		defer host.Close()
 
 		// Generate a random peer ID that doesn't exist
-		_, pub, _ := crypto.GenerateKeyPair(crypto.Ed25519, 2048)
-		fakePeerID, _ := peer.IDFromPublicKey(pub)
+		_, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, 2048)
+		require.NoError(t, err)
+		fakePeerID, err := peer.IDFromPublicKey(pub)
+		require.NoError(t, err)
 
-		err := host.SendMessage(ctx, fakePeerID, []byte("test"))
+		err = host.SendMessage(ctx, fakePeerID, []byte("test"))
 		assert.Error(t, err)
 	})
 }
@@ -530,11 +548,12 @@ func TestBroadcast(t *testing.T) {
 	t.Run("BroadcastWithNoPeers", func(t *testing.T) {
 		ctx := context.Background()
 
-		host, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "broadcaster"})
+		host, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "broadcaster"})
+		require.NoError(t, err)
 		defer host.Close()
 
 		// Broadcast should succeed even with no peers
-		err := host.Broadcast(ctx, []byte("broadcast message"))
+		err = host.Broadcast(ctx, []byte("broadcast message"))
 		assert.NoError(t, err)
 	})
 
@@ -542,24 +561,27 @@ func TestBroadcast(t *testing.T) {
 		ctx := context.Background()
 
 		// Create broadcaster
-		host1, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "broadcaster"})
+		host1, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "broadcaster"})
+		require.NoError(t, err)
 		defer host1.Close()
 
 		// Create receivers
-		host2, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "receiver1"})
+		host2, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "receiver1"})
+		require.NoError(t, err)
 		defer host2.Close()
 
-		host3, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "receiver2"})
+		host3, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "receiver2"})
+		require.NoError(t, err)
 		defer host3.Close()
 
 		// Connect broadcaster to receivers
-		host1.Connect(ctx, peer.AddrInfo{ID: host2.ID(), Addrs: host2.Addrs()})
-		host1.Connect(ctx, peer.AddrInfo{ID: host3.ID(), Addrs: host3.Addrs()})
+		require.NoError(t, host1.Connect(ctx, peer.AddrInfo{ID: host2.ID(), Addrs: host2.Addrs()}))
+		require.NoError(t, host1.Connect(ctx, peer.AddrInfo{ID: host3.ID(), Addrs: host3.Addrs()}))
 
 		time.Sleep(100 * time.Millisecond)
 
 		// Broadcast
-		err := host1.Broadcast(ctx, []byte("broadcast test"))
+		err = host1.Broadcast(ctx, []byte("broadcast test"))
 		// May fail if connections aren't fully established in test env
 		if err != nil {
 			t.Logf("Broadcast error (expected in some test environments): %v", err)
@@ -572,18 +594,20 @@ func TestSendTo(t *testing.T) {
 	t.Run("SendToWithValidPeerID", func(t *testing.T) {
 		ctx := context.Background()
 
-		host1, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "send-to-sender"})
+		host1, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "send-to-sender"})
+		require.NoError(t, err)
 		defer host1.Close()
 
-		host2, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "send-to-receiver"})
+		host2, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "send-to-receiver"})
+		require.NoError(t, err)
 		defer host2.Close()
 
 		// Connect
-		host1.Connect(ctx, peer.AddrInfo{ID: host2.ID(), Addrs: host2.Addrs()})
+		require.NoError(t, host1.Connect(ctx, peer.AddrInfo{ID: host2.ID(), Addrs: host2.Addrs()}))
 		time.Sleep(100 * time.Millisecond)
 
 		// Send using string peer ID
-		err := host1.SendTo(ctx, host2.ID().String(), []byte("test"))
+		err = host1.SendTo(ctx, host2.ID().String(), []byte("test"))
 		// May fail in test environment
 		if err != nil {
 			t.Logf("SendTo error (expected in test environment): %v", err)
@@ -593,10 +617,11 @@ func TestSendTo(t *testing.T) {
 	t.Run("SendToWithInvalidPeerID", func(t *testing.T) {
 		ctx := context.Background()
 
-		host, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "send-to-test"})
+		host, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "send-to-test"})
+		require.NoError(t, err)
 		defer host.Close()
 
-		err := host.SendTo(ctx, "invalid-peer-id", []byte("test"))
+		err = host.SendTo(ctx, "invalid-peer-id", []byte("test"))
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to decode peer ID")
 	})
@@ -662,7 +687,8 @@ func TestHostClose(t *testing.T) {
 func TestConcurrentOperations(t *testing.T) {
 	t.Run("ConcurrentHandlerRegistration", func(t *testing.T) {
 		ctx := context.Background()
-		host, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "concurrent-handlers"})
+		host, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "concurrent-handlers"})
+		require.NoError(t, err)
 		defer host.Close()
 
 		done := make(chan bool)
@@ -687,7 +713,8 @@ func TestConcurrentOperations(t *testing.T) {
 
 	t.Run("ConcurrentGetPeers", func(t *testing.T) {
 		ctx := context.Background()
-		host, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "concurrent-get-peers"})
+		host, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "concurrent-get-peers"})
+		require.NoError(t, err)
 		defer host.Close()
 
 		done := make(chan bool)
@@ -710,10 +737,12 @@ func TestPeerConnectionTracking(t *testing.T) {
 	t.Run("PeerConnectionMetadata", func(t *testing.T) {
 		ctx := context.Background()
 
-		host1, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "metadata-1"})
+		host1, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "metadata-1"})
+		require.NoError(t, err)
 		defer host1.Close()
 
-		host2, _ := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "metadata-2"})
+		host2, err := NewP2PHost(ctx, &Config{ListenPort: 0, NodeID: "metadata-2"})
+		require.NoError(t, err)
 		defer host2.Close()
 
 		// Connect
@@ -721,7 +750,7 @@ func TestPeerConnectionTracking(t *testing.T) {
 			ID:    host1.ID(),
 			Addrs: host1.Addrs(),
 		}
-		host2.Connect(ctx, peerInfo)
+		require.NoError(t, host2.Connect(ctx, peerInfo))
 
 		time.Sleep(100 * time.Millisecond)
 

@@ -532,7 +532,7 @@ func TestFanoutAdjustment(t *testing.T) {
 		}
 
 		// Manually adjust fanout (normally done by adjustFanout goroutine)
-		newFanout := 10 // sqrt(100) = 10
+		newFanout := 10 // square root of 100 is 10
 		engine.mu.Lock()
 		engine.fanout = newFanout
 		engine.mu.Unlock()
