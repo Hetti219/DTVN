@@ -61,7 +61,10 @@ func (m *MockValidator) ConsumeTicket(ticketID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if ticket, ok := m.tickets[ticketID]; ok {
-		ticketMap := ticket.(map[string]interface{})
+		ticketMap, ok := ticket.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected ticket type for ticket %s", ticketID)
+		}
 		ticketMap["state"] = "CONSUMED"
 		return nil
 	}
@@ -75,7 +78,10 @@ func (m *MockValidator) DisputeTicket(ticketID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if ticket, ok := m.tickets[ticketID]; ok {
-		ticketMap := ticket.(map[string]interface{})
+		ticketMap, ok := ticket.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected ticket type for ticket %s", ticketID)
+		}
 		ticketMap["state"] = "DISPUTED"
 		return nil
 	}
@@ -225,7 +231,8 @@ func TestValidateTicket(t *testing.T) {
 			TicketID: "ticket-001",
 			Data:     []byte("test-data"),
 		}
-		body, _ := json.Marshal(reqBody)
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
 
 		req := httptest.NewRequest("POST", "/api/v1/tickets/validate", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -236,7 +243,7 @@ func TestValidateTicket(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		var resp Response
-		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		err = json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 		assert.True(t, resp.Success)
 		assert.Contains(t, resp.Message, "validated successfully")
@@ -249,7 +256,8 @@ func TestValidateTicket(t *testing.T) {
 			TicketID: "",
 			Data:     []byte("test-data"),
 		}
-		body, _ := json.Marshal(reqBody)
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
 
 		req := httptest.NewRequest("POST", "/api/v1/tickets/validate", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -260,7 +268,7 @@ func TestValidateTicket(t *testing.T) {
 		assert.Equal(t, http.StatusBadRequest, w.Code)
 
 		var resp Response
-		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		err = json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 		assert.False(t, resp.Success)
 		assert.Contains(t, resp.Error, "ticket_id is required")
@@ -291,7 +299,8 @@ func TestValidateTicket(t *testing.T) {
 			TicketID: "ticket-001",
 			Data:     []byte("test-data"),
 		}
-		body, _ := json.Marshal(reqBody)
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
 
 		req := httptest.NewRequest("POST", "/api/v1/tickets/validate", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -302,7 +311,7 @@ func TestValidateTicket(t *testing.T) {
 		assert.Equal(t, http.StatusInternalServerError, w.Code)
 
 		var resp Response
-		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		err = json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 		assert.False(t, resp.Success)
 		assert.Contains(t, resp.Error, "validation failed")
@@ -315,12 +324,13 @@ func TestConsumeTicket(t *testing.T) {
 		server, validator := createTestServer(t)
 
 		// First validate a ticket
-		validator.ValidateTicket("ticket-002", []byte("test"))
+		require.NoError(t, validator.ValidateTicket("ticket-002", []byte("test")))
 
 		reqBody := ConsumeRequest{
 			TicketID: "ticket-002",
 		}
-		body, _ := json.Marshal(reqBody)
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
 
 		req := httptest.NewRequest("POST", "/api/v1/tickets/consume", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -331,7 +341,7 @@ func TestConsumeTicket(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		var resp Response
-		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		err = json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 		assert.True(t, resp.Success)
 	})
@@ -342,7 +352,8 @@ func TestConsumeTicket(t *testing.T) {
 		reqBody := ConsumeRequest{
 			TicketID: "",
 		}
-		body, _ := json.Marshal(reqBody)
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
 
 		req := httptest.NewRequest("POST", "/api/v1/tickets/consume", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -360,7 +371,8 @@ func TestConsumeTicket(t *testing.T) {
 		reqBody := ConsumeRequest{
 			TicketID: "ticket-999",
 		}
-		body, _ := json.Marshal(reqBody)
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
 
 		req := httptest.NewRequest("POST", "/api/v1/tickets/consume", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -378,12 +390,13 @@ func TestDisputeTicket(t *testing.T) {
 		server, validator := createTestServer(t)
 
 		// First validate a ticket
-		validator.ValidateTicket("ticket-003", []byte("test"))
+		require.NoError(t, validator.ValidateTicket("ticket-003", []byte("test")))
 
 		reqBody := DisputeRequest{
 			TicketID: "ticket-003",
 		}
-		body, _ := json.Marshal(reqBody)
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
 
 		req := httptest.NewRequest("POST", "/api/v1/tickets/dispute", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -394,7 +407,7 @@ func TestDisputeTicket(t *testing.T) {
 		assert.Equal(t, http.StatusOK, w.Code)
 
 		var resp Response
-		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		err = json.Unmarshal(w.Body.Bytes(), &resp)
 		require.NoError(t, err)
 		assert.True(t, resp.Success)
 	})
@@ -405,7 +418,8 @@ func TestDisputeTicket(t *testing.T) {
 		reqBody := DisputeRequest{
 			TicketID: "",
 		}
-		body, _ := json.Marshal(reqBody)
+		body, err := json.Marshal(reqBody)
+		require.NoError(t, err)
 
 		req := httptest.NewRequest("POST", "/api/v1/tickets/dispute", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
@@ -417,15 +431,98 @@ func TestDisputeTicket(t *testing.T) {
 	})
 }
 
+// TestTicketActionDataField pins the per-endpoint decoding contract of the
+// ticket mutation endpoints: the validate endpoint decodes the "data" field
+// as base64 and must reject a malformed value, while the consume and dispute
+// endpoints ignore that field entirely and must not fail to decode because
+// of it.
+func TestTicketActionDataField(t *testing.T) {
+	// The data value below is not valid base64, so decoding it into a
+	// []byte fails. Only the validate endpoint reads that field.
+	malformedBody := []byte(`{"ticket_id":"ticket-010","data":"!!!not-base64!!!"}`)
+
+	t.Run("ValidateRejectsMalformedData", func(t *testing.T) {
+		server, _ := createTestServer(t)
+
+		req := httptest.NewRequest("POST", "/api/v1/tickets/validate", bytes.NewReader(malformedBody))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		server.router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusBadRequest, w.Code)
+
+		var resp Response
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.False(t, resp.Success)
+		assert.Equal(t, "Invalid request body", resp.Error)
+	})
+
+	t.Run("ConsumeIgnoresMalformedData", func(t *testing.T) {
+		server, validator := createTestServer(t)
+		require.NoError(t, validator.ValidateTicket("ticket-010", []byte("test")))
+
+		req := httptest.NewRequest("POST", "/api/v1/tickets/consume", bytes.NewReader(malformedBody))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		server.router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp Response
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.True(t, resp.Success)
+		assert.Equal(t, "Ticket consumed successfully", resp.Message)
+
+		// The request must have reached the validator, which consumed the
+		// ticket it was given.
+		ticket, err := validator.GetTicket("ticket-010")
+		require.NoError(t, err)
+		ticketMap, ok := ticket.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "CONSUMED", ticketMap["state"])
+	})
+
+	t.Run("DisputeIgnoresMalformedData", func(t *testing.T) {
+		server, validator := createTestServer(t)
+		require.NoError(t, validator.ValidateTicket("ticket-010", []byte("test")))
+
+		req := httptest.NewRequest("POST", "/api/v1/tickets/dispute", bytes.NewReader(malformedBody))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+
+		server.router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+
+		var resp Response
+		err := json.Unmarshal(w.Body.Bytes(), &resp)
+		require.NoError(t, err)
+		assert.True(t, resp.Success)
+		assert.Equal(t, "Ticket disputed successfully", resp.Message)
+
+		// The request must have reached the validator, which disputed the
+		// ticket it was given.
+		ticket, err := validator.GetTicket("ticket-010")
+		require.NoError(t, err)
+		ticketMap, ok := ticket.(map[string]interface{})
+		require.True(t, ok)
+		assert.Equal(t, "DISPUTED", ticketMap["state"])
+	})
+}
+
 // TestGetTicket tests retrieving a single ticket
 func TestGetTicket(t *testing.T) {
 	t.Run("GetTicketSuccess", func(t *testing.T) {
 		server, validator := createTestServer(t)
 
 		// Add a ticket
-		validator.ValidateTicket("ticket-004", []byte("test"))
+		require.NoError(t, validator.ValidateTicket("ticket-004", []byte("test")))
 
-		req := httptest.NewRequest("GET", "/api/v1/tickets/ticket-004", nil)
+		req := httptest.NewRequest("GET", "/api/v1/tickets/ticket-004", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -442,7 +539,7 @@ func TestGetTicket(t *testing.T) {
 	t.Run("GetTicketNotFound", func(t *testing.T) {
 		server, _ := createTestServer(t)
 
-		req := httptest.NewRequest("GET", "/api/v1/tickets/non-existent", nil)
+		req := httptest.NewRequest("GET", "/api/v1/tickets/non-existent", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -459,7 +556,7 @@ func TestGetTicket(t *testing.T) {
 		server, validator := createTestServer(t)
 		validator.getTicketErr = errors.New("database error")
 
-		req := httptest.NewRequest("GET", "/api/v1/tickets/ticket-005", nil)
+		req := httptest.NewRequest("GET", "/api/v1/tickets/ticket-005", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -474,11 +571,11 @@ func TestGetAllTickets(t *testing.T) {
 		server, validator := createTestServer(t)
 
 		// Add multiple tickets
-		validator.ValidateTicket("ticket-1", []byte("test1"))
-		validator.ValidateTicket("ticket-2", []byte("test2"))
-		validator.ValidateTicket("ticket-3", []byte("test3"))
+		require.NoError(t, validator.ValidateTicket("ticket-1", []byte("test1")))
+		require.NoError(t, validator.ValidateTicket("ticket-2", []byte("test2")))
+		require.NoError(t, validator.ValidateTicket("ticket-3", []byte("test3")))
 
-		req := httptest.NewRequest("GET", "/api/v1/tickets", nil)
+		req := httptest.NewRequest("GET", "/api/v1/tickets", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -490,14 +587,15 @@ func TestGetAllTickets(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, resp.Success)
 
-		tickets := resp.Data.([]interface{})
+		tickets, ok := resp.Data.([]interface{})
+		require.True(t, ok)
 		assert.Len(t, tickets, 3)
 	})
 
 	t.Run("GetAllTicketsEmpty", func(t *testing.T) {
 		server, _ := createTestServer(t)
 
-		req := httptest.NewRequest("GET", "/api/v1/tickets", nil)
+		req := httptest.NewRequest("GET", "/api/v1/tickets", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -516,7 +614,7 @@ func TestGetStatus(t *testing.T) {
 	t.Run("GetStatusSuccess", func(t *testing.T) {
 		server, _ := createTestServer(t)
 
-		req := httptest.NewRequest("GET", "/api/v1/status", nil)
+		req := httptest.NewRequest("GET", "/api/v1/status", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -528,7 +626,8 @@ func TestGetStatus(t *testing.T) {
 		require.NoError(t, err)
 		assert.True(t, resp.Success)
 
-		data := resp.Data.(map[string]interface{})
+		data, ok := resp.Data.(map[string]interface{})
+		require.True(t, ok)
 		assert.Equal(t, "running", data["status"])
 		assert.Contains(t, data, "timestamp")
 	})
@@ -539,7 +638,7 @@ func TestGetStats(t *testing.T) {
 	t.Run("GetStatsSuccess", func(t *testing.T) {
 		server, _ := createTestServer(t)
 
-		req := httptest.NewRequest("GET", "/api/v1/stats", nil)
+		req := httptest.NewRequest("GET", "/api/v1/stats", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -559,7 +658,7 @@ func TestGetPeers(t *testing.T) {
 	t.Run("GetPeersSuccess", func(t *testing.T) {
 		server, _ := createTestServer(t)
 
-		req := httptest.NewRequest("GET", "/api/v1/peers", nil)
+		req := httptest.NewRequest("GET", "/api/v1/peers", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -577,7 +676,7 @@ func TestGetPeers(t *testing.T) {
 		server, validator := createTestServer(t)
 		validator.getPeersErr = errors.New("failed to get peers")
 
-		req := httptest.NewRequest("GET", "/api/v1/peers", nil)
+		req := httptest.NewRequest("GET", "/api/v1/peers", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -591,7 +690,7 @@ func TestGetConfig(t *testing.T) {
 	t.Run("GetConfigSuccess", func(t *testing.T) {
 		server, _ := createTestServer(t)
 
-		req := httptest.NewRequest("GET", "/api/v1/config", nil)
+		req := httptest.NewRequest("GET", "/api/v1/config", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -609,7 +708,7 @@ func TestGetConfig(t *testing.T) {
 		server, validator := createTestServer(t)
 		validator.getConfigErr = errors.New("config error")
 
-		req := httptest.NewRequest("GET", "/api/v1/config", nil)
+		req := httptest.NewRequest("GET", "/api/v1/config", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -623,7 +722,7 @@ func TestHealthCheck(t *testing.T) {
 	t.Run("HealthCheckSuccess", func(t *testing.T) {
 		server, _ := createTestServer(t)
 
-		req := httptest.NewRequest("GET", "/health", nil)
+		req := httptest.NewRequest("GET", "/health", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -642,7 +741,7 @@ func TestCORSMiddleware(t *testing.T) {
 	t.Run("CORSHeadersPresent", func(t *testing.T) {
 		server, _ := createTestServer(t)
 
-		req := httptest.NewRequest("GET", "/api/v1/status", nil)
+		req := httptest.NewRequest("GET", "/api/v1/status", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -655,7 +754,7 @@ func TestCORSMiddleware(t *testing.T) {
 	t.Run("OPTIONSRequest", func(t *testing.T) {
 		server, _ := createTestServer(t)
 
-		req := httptest.NewRequest("OPTIONS", "/api/v1/tickets/validate", nil)
+		req := httptest.NewRequest("OPTIONS", "/api/v1/tickets/validate", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -736,7 +835,8 @@ func TestConcurrentRequests(t *testing.T) {
 					TicketID: "concurrent-" + string(rune('0'+id)),
 					Data:     []byte("test"),
 				}
-				body, _ := json.Marshal(reqBody)
+				body, err := json.Marshal(reqBody)
+				assert.NoError(t, err)
 
 				req := httptest.NewRequest("POST", "/api/v1/tickets/validate", bytes.NewReader(body))
 				req.Header.Set("Content-Type", "application/json")
@@ -771,12 +871,23 @@ func TestWebSocketConnection(t *testing.T) {
 		wsURL := "ws" + testServer.URL[4:] + "/ws"
 
 		// Connect to WebSocket
-		ws, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		ws, handshakeResp, err := websocket.DefaultDialer.Dial(wsURL, nil)
+		if handshakeResp != nil && handshakeResp.Body != nil {
+			defer func() {
+				if cerr := handshakeResp.Body.Close(); cerr != nil {
+					t.Logf("failed to close websocket handshake response body: %v", cerr)
+				}
+			}()
+		}
 		if err != nil {
 			t.Skipf("WebSocket connection failed (expected in test environment): %v", err)
 			return
 		}
-		defer ws.Close()
+		defer func() {
+			if err := ws.Close(); err != nil {
+				t.Logf("failed to close websocket connection: %v", err)
+			}
+		}()
 
 		// Verify connection registered
 		server.wsMu.RLock()
@@ -792,7 +903,7 @@ func TestMethodNotAllowed(t *testing.T) {
 	t.Run("GetOnPostEndpoint", func(t *testing.T) {
 		server, _ := createTestServer(t)
 
-		req := httptest.NewRequest("GET", "/api/v1/tickets/validate", nil)
+		req := httptest.NewRequest("GET", "/api/v1/tickets/validate", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -804,7 +915,7 @@ func TestMethodNotAllowed(t *testing.T) {
 	t.Run("PostOnGetEndpoint", func(t *testing.T) {
 		server, _ := createTestServer(t)
 
-		req := httptest.NewRequest("POST", "/api/v1/status", nil)
+		req := httptest.NewRequest("POST", "/api/v1/status", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -818,9 +929,9 @@ func TestMethodNotAllowed(t *testing.T) {
 func TestResponseFormats(t *testing.T) {
 	t.Run("SuccessResponseFormat", func(t *testing.T) {
 		server, validator := createTestServer(t)
-		validator.ValidateTicket("ticket-format", []byte("test"))
+		require.NoError(t, validator.ValidateTicket("ticket-format", []byte("test")))
 
-		req := httptest.NewRequest("GET", "/api/v1/tickets/ticket-format", nil)
+		req := httptest.NewRequest("GET", "/api/v1/tickets/ticket-format", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)
@@ -838,7 +949,7 @@ func TestResponseFormats(t *testing.T) {
 	t.Run("ErrorResponseFormat", func(t *testing.T) {
 		server, _ := createTestServer(t)
 
-		req := httptest.NewRequest("GET", "/api/v1/tickets/non-existent", nil)
+		req := httptest.NewRequest("GET", "/api/v1/tickets/non-existent", http.NoBody)
 		w := httptest.NewRecorder()
 
 		server.router.ServeHTTP(w, req)

@@ -27,6 +27,15 @@ linters:
         - (*go.etcd.io/bbolt.DB).Close
         - (*os.File).Close
         - (*net.Conn).Close
+        - (io.ReadCloser).Close
+        - (*github.com/Hetti219/DTVN/pkg/storage.Store).Close
+        - (*github.com/Hetti219/DTVN/pkg/network.P2PHost).Close
+        - (*github.com/Hetti219/DTVN/pkg/gossip.GossipEngine).Close
+        - (*github.com/Hetti219/DTVN/pkg/consensus.PBFTNode).Close
+        - (*github.com/Hetti219/DTVN/test/integration/testutil.TestCluster).Stop
+        - (*github.com/Hetti219/DTVN/test/integration/testutil.TestCluster).Cleanup
+        - (*github.com/Hetti219/DTVN/test/integration/testutil.TestNode).Stop
+        - (*github.com/Hetti219/DTVN/test/integration/testutil.TestNode).Close
     goconst:
       min-len: 3
       min-occurrences: 3
@@ -89,8 +98,25 @@ linters:
         path: _test\.go
 
       # Exclude generated protocol buffer code
+      # NOTE: in v2 the `all` keyword matches no linter inside an exclusion
+      # rule, so the enabled linters must be listed explicitly. The list below
+      # is the full effective enabled set (see `golangci-lint linters`).
       - linters:
-          - all
+          - bodyclose
+          - dupl
+          - errcheck
+          - goconst
+          - gocritic
+          - gocyclo
+          - gosec
+          - govet
+          - ineffassign
+          - misspell
+          - prealloc
+          - revive
+          - staticcheck
+          - unconvert
+          - unused
         path: \.pb\.go$
 
       # Allow init functions (used for crypto key generation)

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -19,6 +20,14 @@ import (
 // maxRequestBodySize limits the size of incoming JSON request bodies (1 MB).
 // Prevents clients from sending excessively large payloads that waste memory.
 const maxRequestBodySize = 1 << 20
+
+// JSON keys used in the broadcast payloads and status maps produced by the
+// API server.
+const (
+	jsonKeyType      = "type"
+	jsonKeyTicketID  = "ticket_id"
+	jsonKeyTimestamp = "timestamp"
+)
 
 // Server represents the API server
 type Server struct {
@@ -60,15 +69,21 @@ type Config struct {
 
 // Request/Response structures
 
+// ValidateRequest is the request body of the validate endpoint. The optional
+// data field is carried as base64 and is rejected when it is malformed.
 type ValidateRequest struct {
 	TicketID string `json:"ticket_id"`
 	Data     []byte `json:"data"`
 }
 
+// ConsumeRequest is the request body of the consume endpoint. Only the
+// ticket identifier is read; any other field sent by a client is ignored.
 type ConsumeRequest struct {
 	TicketID string `json:"ticket_id"`
 }
 
+// DisputeRequest is the request body of the dispute endpoint. Only the
+// ticket identifier is read; any other field sent by a client is ignored.
 type DisputeRequest struct {
 	TicketID string `json:"ticket_id"`
 }
@@ -176,88 +191,75 @@ func (s *Server) Start() error {
 
 // Handler functions
 
-func (s *Server) handleValidateTicket(w http.ResponseWriter, r *http.Request) {
+// ticketActionRequest is implemented by the request bodies of the ticket
+// mutation endpoints (validate, consume and dispute). Each endpoint has its
+// own request type, so that the wire contract of an endpoint is described by
+// exactly one type.
+type ticketActionRequest interface {
+	// ticketID returns the ticket identifier carried by the request body.
+	ticketID() string
+}
+
+// ticketID returns the ticket identifier carried by the request body.
+func (r ValidateRequest) ticketID() string { return r.TicketID }
+
+// ticketID returns the ticket identifier carried by the request body.
+func (r ConsumeRequest) ticketID() string { return r.TicketID }
+
+// ticketID returns the ticket identifier carried by the request body.
+func (r DisputeRequest) ticketID() string { return r.TicketID }
+
+// handleTicketAction implements the request handling shared by the validate,
+// consume and dispute endpoints. They only differ in the request body they
+// decode (the type parameter), the action they perform, the broadcast event
+// they emit and the success message they return.
+func handleTicketAction[T ticketActionRequest](s *Server, w http.ResponseWriter, r *http.Request, action, eventType, successMsg string, apply func(req T) error) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	var req ValidateRequest
+	var req T
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.sendError(w, http.StatusBadRequest, "Invalid request body")
 		return
 	}
 
-	if req.TicketID == "" {
+	if req.ticketID() == "" {
 		s.sendError(w, http.StatusBadRequest, "ticket_id is required")
 		return
 	}
 
-	if err := s.validator.ValidateTicket(req.TicketID, req.Data); err != nil {
-		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to validate ticket: %v", err))
+	if err := apply(req); err != nil {
+		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to %s ticket: %v", action, err))
 		return
 	}
 
 	// Broadcast update
 	s.broadcast <- map[string]interface{}{
-		"type":      "ticket_validated",
-		"ticket_id": req.TicketID,
-		"timestamp": time.Now().Unix(),
+		jsonKeyType:      eventType,
+		jsonKeyTicketID:  req.ticketID(),
+		jsonKeyTimestamp: time.Now().Unix(),
 	}
 
-	s.sendSuccess(w, "Ticket validated successfully", nil)
+	s.sendSuccess(w, successMsg, nil)
+}
+
+func (s *Server) handleValidateTicket(w http.ResponseWriter, r *http.Request) {
+	handleTicketAction(s, w, r, "validate", "ticket_validated", "Ticket validated successfully",
+		func(req ValidateRequest) error {
+			return s.validator.ValidateTicket(req.TicketID, req.Data)
+		})
 }
 
 func (s *Server) handleConsumeTicket(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	var req ConsumeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.sendError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	if req.TicketID == "" {
-		s.sendError(w, http.StatusBadRequest, "ticket_id is required")
-		return
-	}
-
-	if err := s.validator.ConsumeTicket(req.TicketID); err != nil {
-		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to consume ticket: %v", err))
-		return
-	}
-
-	// Broadcast update
-	s.broadcast <- map[string]interface{}{
-		"type":      "ticket_consumed",
-		"ticket_id": req.TicketID,
-		"timestamp": time.Now().Unix(),
-	}
-
-	s.sendSuccess(w, "Ticket consumed successfully", nil)
+	handleTicketAction(s, w, r, "consume", "ticket_consumed", "Ticket consumed successfully",
+		func(req ConsumeRequest) error {
+			return s.validator.ConsumeTicket(req.TicketID)
+		})
 }
 
 func (s *Server) handleDisputeTicket(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
-	var req DisputeRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		s.sendError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	if req.TicketID == "" {
-		s.sendError(w, http.StatusBadRequest, "ticket_id is required")
-		return
-	}
-
-	if err := s.validator.DisputeTicket(req.TicketID); err != nil {
-		s.sendError(w, http.StatusInternalServerError, fmt.Sprintf("Failed to dispute ticket: %v", err))
-		return
-	}
-
-	// Broadcast update
-	s.broadcast <- map[string]interface{}{
-		"type":      "ticket_disputed",
-		"ticket_id": req.TicketID,
-		"timestamp": time.Now().Unix(),
-	}
-
-	s.sendSuccess(w, "Ticket disputed successfully", nil)
+	handleTicketAction(s, w, r, "dispute", "ticket_disputed", "Ticket disputed successfully",
+		func(req DisputeRequest) error {
+			return s.validator.DisputeTicket(req.TicketID)
+		})
 }
 
 func (s *Server) handleSeedTickets(w http.ResponseWriter, r *http.Request) {
@@ -268,9 +270,9 @@ func (s *Server) handleSeedTickets(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.broadcast <- map[string]interface{}{
-		"type":      "tickets_seeded",
-		"count":     seeded,
-		"timestamp": time.Now().Unix(),
+		jsonKeyType:      "tickets_seeded",
+		"count":          seeded,
+		jsonKeyTimestamp: time.Now().Unix(),
 	}
 
 	s.sendSuccess(w, fmt.Sprintf("Seeded %d tickets", seeded), map[string]int{"seeded": seeded})
@@ -301,9 +303,9 @@ func (s *Server) handleGetAllTickets(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	status := map[string]interface{}{
-		"status":     "running",
-		"timestamp":  time.Now().Unix(),
-		"ws_clients": len(s.wsClients),
+		"status":         "running",
+		jsonKeyTimestamp: time.Now().Unix(),
+		"ws_clients":     len(s.wsClients),
 	}
 
 	s.sendSuccess(w, "Status retrieved successfully", status)
@@ -334,8 +336,7 @@ func (s *Server) handleGetStorageEntries(w http.ResponseWriter, r *http.Request)
 }
 
 func (s *Server) handleHealthCheck(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+	writeJSONResponse(w, http.StatusOK, map[string]string{"status": "healthy"})
 }
 
 // WebSocket handler
@@ -358,7 +359,9 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		s.wsMu.Lock()
 		delete(s.wsClients, conn)
 		s.wsMu.Unlock()
-		_ = conn.Close()
+		if err := conn.Close(); err != nil {
+			fmt.Printf("WebSocket close error: %v\n", err)
+		}
 		fmt.Printf("WebSocket client disconnected: %s\n", conn.RemoteAddr())
 	}()
 
@@ -390,13 +393,17 @@ func (s *Server) broadcastLoop() {
 
 			// Write to each client without holding any lock
 			for _, client := range clients {
-				if err := client.WriteJSON(msg); err != nil {
-					fmt.Printf("WebSocket write error: %v\n", err)
-					_ = client.Close()
-					s.wsMu.Lock()
-					delete(s.wsClients, client)
-					s.wsMu.Unlock()
+				err := client.WriteJSON(msg)
+				if err == nil {
+					continue
 				}
+				fmt.Printf("WebSocket write error: %v\n", err)
+				if closeErr := client.Close(); closeErr != nil {
+					fmt.Printf("WebSocket close error: %v\n", closeErr)
+				}
+				s.wsMu.Lock()
+				delete(s.wsClients, client)
+				s.wsMu.Unlock()
 			}
 		}
 	}
@@ -496,22 +503,47 @@ func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
 
 // Helper functions
 
-func (s *Server) sendSuccess(w http.ResponseWriter, message string, data interface{}) {
+// encodeJSON serialises payload as JSON. It is used by the response helpers so
+// that an encoding failure can be reported to the client instead of producing
+// a truncated response body.
+func encodeJSON(payload interface{}) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(payload); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// writeJSONResponse writes payload to w as JSON with the given status code.
+// The payload is encoded before the status line is written so that an encoding
+// failure is still reported to the client as a 500 instead of a broken body.
+func writeJSONResponse(w http.ResponseWriter, statusCode int, payload interface{}) {
+	body, err := encodeJSON(payload)
+	if err != nil {
+		fmt.Printf("API: failed to encode JSON response: %v\n", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(Response{
+	w.WriteHeader(statusCode)
+	if _, err := w.Write(body); err != nil {
+		fmt.Printf("API: failed to write JSON response: %v\n", err)
+	}
+}
+
+func (s *Server) sendSuccess(w http.ResponseWriter, message string, data interface{}) {
+	writeJSONResponse(w, http.StatusOK, Response{
 		Success: true,
 		Message: message,
 		Data:    data,
 	})
 }
 
-func (s *Server) sendError(w http.ResponseWriter, statusCode int, error string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(statusCode)
-	_ = json.NewEncoder(w).Encode(Response{
+func (s *Server) sendError(w http.ResponseWriter, statusCode int, errMsg string) {
+	writeJSONResponse(w, statusCode, Response{
 		Success: false,
-		Error:   error,
+		Error:   errMsg,
 	})
 }
 
