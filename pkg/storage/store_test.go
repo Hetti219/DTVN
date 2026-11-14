@@ -666,7 +666,8 @@ func TestGetStats(t *testing.T) {
 		assert.NotNil(t, stats)
 
 		// Transaction count should be >= 0 (BoltDB counts total lifetime transactions)
-		txCount := stats["tx_count"].(int)
+		txCount, ok := stats["tx_count"].(int)
+		require.True(t, ok)
 		assert.GreaterOrEqual(t, txCount, 0)
 	})
 }

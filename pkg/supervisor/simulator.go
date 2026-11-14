@@ -211,13 +211,14 @@ func (s *SimulatorController) runSimulator(config *SimulatorConfig) {
 	err = cmd.Wait()
 
 	s.mu.Lock()
-	if ctx.Err() == context.Canceled {
+	switch {
+	case ctx.Err() == context.Canceled:
 		s.status = SimulatorStatusIdle
 		s.addOutput("Simulation cancelled by user")
-	} else if err != nil {
+	case err != nil:
 		s.status = SimulatorStatusError
 		s.addOutput(fmt.Sprintf("Simulation error: %v", err))
-	} else {
+	default:
 		s.status = SimulatorStatusComplete
 		s.addOutput("Simulation completed successfully")
 	}
@@ -283,26 +284,16 @@ func (s *SimulatorController) streamOutput(reader io.Reader) {
 
 		// Parse progress updates
 		if matches := progressRegex.FindStringSubmatch(line); len(matches) == 6 {
-			current, _ := strconv.Atoi(matches[1])
-			total, _ := strconv.Atoi(matches[2])
-			rounds, _ := strconv.Atoi(matches[3])
-			success, _ := strconv.Atoi(matches[4])
-			failed, _ := strconv.Atoi(matches[5])
+			progress, ok := parseProgressLine(matches)
+			if !ok {
+				fmt.Printf("Supervisor: failed to parse progress line %q\n", line)
+			} else {
+				s.mu.Lock()
+				s.progress = progress
+				s.mu.Unlock()
 
-			progress := &SimulatorProgress{
-				CurrentTicket:    current,
-				TotalTickets:     total,
-				ConsensusRounds:  rounds,
-				SuccessfulRounds: success,
-				FailedRounds:     failed,
-				ProgressPercent:  float64(current) / float64(total) * 100,
+				s.notifyProgress(progress)
 			}
-
-			s.mu.Lock()
-			s.progress = progress
-			s.mu.Unlock()
-
-			s.notifyProgress(progress)
 		}
 
 		// Parse results section
@@ -326,6 +317,34 @@ func (s *SimulatorController) streamOutput(reader io.Reader) {
 	}
 }
 
+// parseProgressLine parses the numeric fields captured by progressRegex into a
+// SimulatorProgress. It reports ok=false when any of the fields is not a valid
+// integer, so a malformed progress line is never turned into bogus counters.
+func parseProgressLine(matches []string) (*SimulatorProgress, bool) {
+	values := make([]int, 5)
+	for i, raw := range matches[1:6] {
+		value, err := strconv.Atoi(raw)
+		if err != nil {
+			return nil, false
+		}
+		values[i] = value
+	}
+
+	progressPercent := 0.0
+	if values[1] > 0 {
+		progressPercent = float64(values[0]) / float64(values[1]) * 100
+	}
+
+	return &SimulatorProgress{
+		CurrentTicket:    values[0],
+		TotalTickets:     values[1],
+		ConsensusRounds:  values[2],
+		SuccessfulRounds: values[3],
+		FailedRounds:     values[4],
+		ProgressPercent:  progressPercent,
+	}, true
+}
+
 // parseResultLine parses a result line
 func (s *SimulatorController) parseResultLine(key, value string) {
 	s.mu.Lock()
@@ -337,7 +356,12 @@ func (s *SimulatorController) parseResultLine(key, value string) {
 
 	// Clean up the value
 	value = strings.TrimSuffix(value, "%")
-	numValue, _ := strconv.ParseFloat(value, 64)
+	numValue, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		// Leave the result field untouched rather than recording a bogus zero.
+		fmt.Printf("Supervisor: failed to parse result value %q: %v\n", value, err)
+		return
+	}
 	intValue := int(numValue)
 
 	switch strings.TrimSpace(key) {
@@ -498,8 +522,8 @@ func (s *SimulatorController) GetFullState() map[string]interface{} {
 	defer s.mu.RUnlock()
 
 	state := map[string]interface{}{
-		"status": s.status,
-		"output": s.outputLines,
+		jsonKeyStatus: s.status,
+		"output":      s.outputLines,
 	}
 
 	if s.config != nil {
