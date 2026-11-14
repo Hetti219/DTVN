@@ -76,25 +76,25 @@ func (s *Server) getPrimaryNodeURL() (string, error) {
 	// Phase 2: Fall back to static IsPrimary flag from cluster startup.
 	// This handles the case where nodes haven't fully started their API servers
 	// yet but were configured as primary during cluster creation.
-	hasPrimary := false
+	var primary *ManagedNode
 	for _, node := range nodes {
-		if node.IsPrimary {
-			hasPrimary = true
-			if node.Status != NodeStatusRunning {
-				return "", fmt.Errorf("primary node is not running (status: %s). Start a cluster first", node.Status)
-			}
-			url := fmt.Sprintf("http://127.0.0.1:%d", node.APIPort)
-			if !s.isNodeReachable(url) {
-				return "", fmt.Errorf("primary node is still starting up, please try again in a few seconds")
-			}
-			return url, nil
+		if !node.IsPrimary {
+			continue
 		}
+		primary = node
+		break
 	}
-
-	if !hasPrimary {
+	if primary == nil {
 		return "", fmt.Errorf("no primary node found. Start a cluster first")
 	}
-	return "", fmt.Errorf("no running nodes available")
+	if primary.Status != NodeStatusRunning {
+		return "", fmt.Errorf("primary node is not running (status: %s). Start a cluster first", primary.Status)
+	}
+	url := fmt.Sprintf("http://127.0.0.1:%d", primary.APIPort)
+	if !s.isNodeReachable(url) {
+		return "", fmt.Errorf("primary node is still starting up, please try again in a few seconds")
+	}
+	return url, nil
 }
 
 // isNodeReachable checks if a node's API server is actually listening.
@@ -102,7 +102,7 @@ func (s *Server) getPrimaryNodeURL() (string, error) {
 func (s *Server) isNodeReachable(baseURL string) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/health", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/health", http.NoBody)
 	if err != nil {
 		return false
 	}
@@ -120,7 +120,7 @@ func (s *Server) isNodeReachable(baseURL string) bool {
 func (s *Server) checkNodeIsPrimary(baseURL string) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/api/v1/stats", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", baseURL+"/api/v1/stats", http.NoBody)
 	if err != nil {
 		return false, err
 	}
@@ -197,7 +197,9 @@ func (s *Server) proxyRequest(w http.ResponseWriter, r *http.Request, endpoint s
 
 	// Copy status code and body
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		fmt.Printf("Supervisor: failed to copy proxied response body: %v\n", err)
+	}
 }
 
 // proxyRequestToPrimary forwards a read request to the primary node for consistency.
@@ -249,12 +251,14 @@ func (s *Server) proxyRequestToPrimary(w http.ResponseWriter, r *http.Request, e
 	}
 
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		fmt.Printf("Supervisor: failed to copy proxied response body: %v\n", err)
+	}
 }
 
 // proxyTicketRequest proxies a ticket mutation request to the primary node
 // and broadcasts a WebSocket event on success
-func (s *Server) proxyTicketRequest(w http.ResponseWriter, r *http.Request, endpoint string, eventType string) {
+func (s *Server) proxyTicketRequest(w http.ResponseWriter, r *http.Request, endpoint, eventType string) {
 	nodeURL, err := s.getPrimaryNodeURL()
 	if err != nil {
 		s.writeError(w, http.StatusServiceUnavailable, err.Error())
@@ -272,7 +276,12 @@ func (s *Server) proxyTicketRequest(w http.ResponseWriter, r *http.Request, endp
 	var reqBody struct {
 		TicketID string `json:"ticket_id"`
 	}
-	_ = json.Unmarshal(bodyBytes, &reqBody)
+	if err := json.Unmarshal(bodyBytes, &reqBody); err != nil {
+		// The upstream node validates the payload and reports malformed requests;
+		// a parse failure here only means the ticket_id for the WebSocket event is
+		// unknown, so the request is still forwarded.
+		fmt.Printf("Supervisor: failed to parse ticket_id from request body: %v\n", err)
+	}
 
 	// Proxy the request using shared client (reuses TCP connections)
 	targetURL := fmt.Sprintf("%s/api/v1%s", nodeURL, endpoint)
@@ -299,14 +308,16 @@ func (s *Server) proxyTicketRequest(w http.ResponseWriter, r *http.Request, endp
 
 	// Copy status code and body
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		fmt.Printf("Supervisor: failed to copy proxied response body: %v\n", err)
+	}
 
 	// Broadcast WebSocket event on success
 	if resp.StatusCode == http.StatusOK {
 		s.broadcastWSMessage(map[string]interface{}{
-			"type":      eventType,
-			"ticket_id": reqBody.TicketID,
-			"timestamp": time.Now().Unix(),
+			jsonKeyType:      eventType,
+			jsonKeyTicketID:  reqBody.TicketID,
+			jsonKeyTimestamp: time.Now().Unix(),
 		})
 	}
 }
@@ -377,8 +388,8 @@ func (s *Server) handleProxySeedTickets(w http.ResponseWriter, r *http.Request) 
 		}
 		seededTotal += res.Seeded
 		nodeResults = append(nodeResults, map[string]interface{}{
-			"node_id": res.NodeID,
-			"seeded":  res.Seeded,
+			jsonKeyNodeID: res.NodeID,
+			"seeded":      res.Seeded,
 		})
 	}
 
@@ -392,18 +403,18 @@ func (s *Server) handleProxySeedTickets(w http.ResponseWriter, r *http.Request) 
 	}
 
 	s.broadcastWSMessage(map[string]interface{}{
-		"type":      "tickets_seeded",
-		"count":     seededTotal,
-		"nodes":     len(nodeResults),
-		"timestamp": time.Now().Unix(),
+		jsonKeyType:      "tickets_seeded",
+		"count":          seededTotal,
+		jsonKeyNodes:     len(nodeResults),
+		jsonKeyTimestamp: time.Now().Unix(),
 	})
 
 	s.writeJSON(w, map[string]interface{}{
-		"success": true,
-		"message": fmt.Sprintf("Seeded tickets on %d nodes", len(nodeResults)),
-		"data": map[string]interface{}{
+		jsonKeySuccess: true,
+		jsonKeyMessage: fmt.Sprintf("Seeded tickets on %d nodes", len(nodeResults)),
+		jsonKeyData: map[string]interface{}{
 			"total_seeded": seededTotal,
-			"nodes":        nodeResults,
+			jsonKeyNodes:   nodeResults,
 		},
 	})
 }
@@ -413,7 +424,7 @@ func (s *Server) handleProxySeedTickets(w http.ResponseWriter, r *http.Request) 
 func (s *Server) seedNode(nodeID, seedURL string) seedResult {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, "POST", seedURL, nil) // #nosec G107 G704 -- seedURL is constructed from internal 127.0.0.1 node addresses, not user input
+	req, err := http.NewRequestWithContext(ctx, "POST", seedURL, http.NoBody) // #nosec G107 G704 -- seedURL is constructed from internal 127.0.0.1 node addresses, not user input
 	if err != nil {
 		return seedResult{NodeID: nodeID, Err: err}
 	}
@@ -428,7 +439,9 @@ func (s *Server) seedNode(nodeID, seedURL string) seedResult {
 	defer resp.Body.Close()
 
 	var result map[string]interface{}
-	_ = json.NewDecoder(resp.Body).Decode(&result)
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return seedResult{NodeID: nodeID, Err: fmt.Errorf("failed to parse seed response: %w", err)}
+	}
 
 	seeded := 0
 	if data, ok := result["data"].(map[string]interface{}); ok {
@@ -437,6 +450,23 @@ func (s *Server) seedNode(nodeID, seedURL string) seedResult {
 		}
 	}
 	return seedResult{NodeID: nodeID, Seeded: seeded}
+}
+
+// newValidateProxyRequest builds the POST request that forwards a ticket
+// validation to a specific node.
+func newValidateProxyRequest(nodeURL, ticketID string) (*http.Request, error) {
+	body, err := json.Marshal(map[string]string{jsonKeyTicketID: ticketID})
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode validation request: %w", err)
+	}
+
+	targetURL := fmt.Sprintf("%s/api/v1/tickets/validate", nodeURL)
+	req, err := http.NewRequest("POST", targetURL, bytes.NewReader(body)) // #nosec G107 G704 -- targetURL is constructed from internal 127.0.0.1 node addresses, not user input
+	if err != nil {
+		return nil, fmt.Errorf("failed to create proxy request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	return req, nil
 }
 
 // handleProxyValidateTicketViaNode routes a validation request to a specific node
@@ -485,14 +515,11 @@ func (s *Server) handleProxyValidateTicketViaNode(w http.ResponseWriter, r *http
 	}
 
 	// Proxy the validate request to the specific node
-	validateBody, _ := json.Marshal(map[string]string{"ticket_id": reqBody.TicketID})
-	targetURL := fmt.Sprintf("%s/api/v1/tickets/validate", nodeURL)
-	proxyReq, err := http.NewRequest("POST", targetURL, bytes.NewReader(validateBody)) // #nosec G107 G704 -- targetURL is constructed from internal 127.0.0.1 node addresses, not user input
+	proxyReq, err := newValidateProxyRequest(nodeURL, reqBody.TicketID)
 	if err != nil {
-		s.writeError(w, http.StatusInternalServerError, "Failed to create proxy request")
+		s.writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	proxyReq.Header.Set("Content-Type", "application/json")
 	if s.apiKey != "" {
 		proxyReq.Header.Set("X-API-Key", s.apiKey)
 	}
@@ -511,15 +538,17 @@ func (s *Server) handleProxyValidateTicketViaNode(w http.ResponseWriter, r *http
 		}
 	}
 	w.WriteHeader(resp.StatusCode)
-	_, _ = io.Copy(w, resp.Body)
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		fmt.Printf("Supervisor: failed to copy proxied response body: %v\n", err)
+	}
 
 	// Broadcast WebSocket event on success
 	if resp.StatusCode == http.StatusOK {
 		s.broadcastWSMessage(map[string]interface{}{
-			"type":      "ticket_validated",
-			"ticket_id": reqBody.TicketID,
-			"node_id":   reqBody.NodeID,
-			"timestamp": time.Now().Unix(),
+			jsonKeyType:      "ticket_validated",
+			jsonKeyTicketID:  reqBody.TicketID,
+			jsonKeyNodeID:    reqBody.NodeID,
+			jsonKeyTimestamp: time.Now().Unix(),
 		})
 	}
 }
@@ -557,20 +586,20 @@ func (s *Server) handleProxyGetStats(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Return supervisor-level stats if no nodes running
 		s.writeJSON(w, map[string]interface{}{
-			"node_id":      "supervisor",
-			"peer_count":   0,
-			"is_primary":   false,
-			"current_view": 0,
-			"sequence":     0,
-			"mode":         "supervisor",
-			"nodes_count":  len(s.nodeManager.GetAllNodes()),
+			jsonKeyNodeID:     supervisorIdentifier,
+			"peer_count":      0,
+			"is_primary":      false,
+			"current_view":    0,
+			"sequence":        0,
+			"mode":            supervisorIdentifier,
+			jsonKeyNodesCount: len(s.nodeManager.GetAllNodes()),
 		})
 		return
 	}
 
 	// Proxy to running node
 	targetURL := fmt.Sprintf("%s/api/v1/stats", nodeURL)
-	statsReq, err := http.NewRequest("GET", targetURL, nil) // #nosec G107 G704 -- targetURL is constructed from internal 127.0.0.1 node addresses, not user input
+	statsReq, err := http.NewRequest("GET", targetURL, http.NoBody) // #nosec G107 G704 -- targetURL is constructed from internal 127.0.0.1 node addresses, not user input
 	if err != nil {
 		s.writeError(w, http.StatusBadGateway, "Failed to get stats from node")
 		return
@@ -594,14 +623,14 @@ func (s *Server) handleProxyGetStats(w http.ResponseWriter, r *http.Request) {
 
 	// Add supervisor mode indicator
 	if dataField, ok := data["data"].(map[string]interface{}); ok {
-		dataField["mode"] = "supervisor"
+		dataField["mode"] = supervisorIdentifier
 		s.writeJSON(w, map[string]interface{}{
-			"success": true,
-			"message": "Stats retrieved successfully",
-			"data":    dataField,
+			jsonKeySuccess: true,
+			jsonKeyMessage: "Stats retrieved successfully",
+			jsonKeyData:    dataField,
 		})
 	} else {
-		data["mode"] = "supervisor"
+		data["mode"] = supervisorIdentifier
 		s.writeJSON(w, data)
 	}
 }
@@ -611,9 +640,9 @@ func (s *Server) handleProxyGetPeers(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Return empty peers list if no nodes running
 		s.writeJSON(w, map[string]interface{}{
-			"success": true,
-			"message": "No running nodes",
-			"data":    []interface{}{},
+			jsonKeySuccess: true,
+			jsonKeyMessage: "No running nodes",
+			jsonKeyData:    []interface{}{},
 		})
 		return
 	}
@@ -627,11 +656,11 @@ func (s *Server) handleProxyGetConfig(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Return supervisor config if no nodes running
 		s.writeJSON(w, map[string]interface{}{
-			"success": true,
-			"message": "Supervisor config",
-			"data": map[string]interface{}{
-				"mode":        "supervisor",
-				"nodes_count": len(s.nodeManager.GetAllNodes()),
+			jsonKeySuccess: true,
+			jsonKeyMessage: "Supervisor config",
+			jsonKeyData: map[string]interface{}{
+				"mode":            supervisorIdentifier,
+				jsonKeyNodesCount: len(s.nodeManager.GetAllNodes()),
 			},
 		})
 		return

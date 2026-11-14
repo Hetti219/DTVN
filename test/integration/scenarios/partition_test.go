@@ -253,6 +253,10 @@ func TestSplitBrainScenario(t *testing.T) {
 	err = node.ValidateTicket(ticket.ID, ticket.Data)
 	// May or may not succeed depending on implementation
 	// The key is that consensus should not be reached
+	// The ticket is not seeded in this scenario, so the error is the expected
+	// outcome; it is reported as a diagnostic only. The authoritative checks are
+	// the consensus-level assertions below.
+	t.Logf("validation in partitioned cluster returned: %v", err)
 
 	time.Sleep(cfg.ConsensusWaitTime)
 

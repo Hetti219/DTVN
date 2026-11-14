@@ -174,7 +174,10 @@ func TestSimultaneousDoubleValidation(t *testing.T) {
 	result1 := <-results
 	result2 := <-results
 
-	// At least one should succeed, at most one should succeed
+	// The number of concurrent validations that returned success is reported as a
+	// diagnostic only: this scenario never seeds the ticket, so the API answers
+	// "404 Ticket not found" and both calls are expected to fail. The
+	// authoritative check is the consensus-level state comparison further down.
 	successCount := 0
 	if result1 == nil {
 		successCount++
@@ -184,7 +187,7 @@ func TestSimultaneousDoubleValidation(t *testing.T) {
 	}
 
 	// Due to timing, both might succeed initially but consensus should prevent double validation
-	fmt.Printf("Validation results: node1=%v, node2=%v\n", result1, result2)
+	t.Logf("Validation results: node1=%v, node2=%v (successful validations: %d)", result1, result2, successCount)
 
 	// Wait for consensus
 	time.Sleep(cfg.ConsensusWaitTime)

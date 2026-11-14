@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// projectRoot returns the absolute path to the project root directory.
+// projectRoot returns the absolute path to the project root directory, or "." if it cannot be determined.
 // It walks up from the current source file until it finds go.mod.
 func projectRoot() string {
 	// First check environment variable (set by the test runner script)
@@ -23,7 +23,12 @@ func projectRoot() string {
 	}
 
 	// Last resort: current working directory
-	cwd, _ := os.Getwd()
+	cwd, err := os.Getwd()
+	if err != nil {
+		// Fall back to a relative path; the caller joins it with the rest of
+		// the project-relative paths, which resolve against the process cwd.
+		return "."
+	}
 	return cwd
 }
 
