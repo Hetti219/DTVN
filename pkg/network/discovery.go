@@ -49,7 +49,7 @@ func NewDiscovery(ctx context.Context, h host.Host, cfg *DiscoveryConfig) (*Disc
 	dhtOpts := []dht.Option{dht.Mode(dht.ModeServer)}
 
 	// Create the DHT
-	kdht, err := dht.New(ctx, h, dhtOpts...)
+	kdht, err := dht.New(h, dhtOpts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create DHT: %w", err)
 	}
