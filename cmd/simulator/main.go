@@ -59,6 +59,9 @@ type SimulatedNode struct {
 	mu            sync.RWMutex
 }
 
+// msgTypeValidate is the message type used for ticket validation proposals.
+const msgTypeValidate = "VALIDATE"
+
 // SimulatedMessage represents a network message
 type SimulatedMessage struct {
 	From      string
@@ -300,17 +303,17 @@ func (s *Simulator) simulateTicketValidation(nodes []*SimulatedNode, ticketID st
 	msg := SimulatedMessage{
 		From:      primary.ID,
 		To:        "all",
-		Type:      "VALIDATE",
+		Type:      msgTypeValidate,
 		Payload:   ticketID,
 		Timestamp: time.Now(),
 	}
 
 	// Broadcast to all nodes (message delivery is async with latency)
-	s.broadcast(nodes, msg)
+	s.broadcast(nodes, &msg)
 }
 
 // broadcast broadcasts a message to all nodes
-func (s *Simulator) broadcast(nodes []*SimulatedNode, msg SimulatedMessage) {
+func (s *Simulator) broadcast(nodes []*SimulatedNode, msg *SimulatedMessage) {
 	for _, node := range nodes {
 		// Skip partitioned nodes
 		node.mu.RLock()
@@ -330,7 +333,7 @@ func (s *Simulator) broadcast(nodes []*SimulatedNode, msg SimulatedMessage) {
 		go func(n *SimulatedNode) {
 			time.Sleep(s.networkLatency)
 			select {
-			case n.MessageQueue <- msg:
+			case n.MessageQueue <- *msg:
 				s.mu.Lock()
 				s.stats.MessagesSent++
 				s.mu.Unlock()
@@ -354,44 +357,52 @@ func (s *Simulator) handleNodeMessages(node *SimulatedNode, allNodes []*Simulate
 
 			// Byzantine nodes behave incorrectly
 			if node.IsByzantine {
-				s.handleByzantineNode(node, msg, allNodes)
+				s.handleByzantineNode(node, &msg, allNodes)
 				continue
 			}
 
 			// Normal nodes process messages correctly
-			s.handleHonestNode(node, msg)
+			s.handleHonestNode(node, &msg)
 		}
 	}
 }
 
 // handleByzantineNode handles Byzantine node behavior
-func (s *Simulator) handleByzantineNode(node *SimulatedNode, msg SimulatedMessage, allNodes []*SimulatedNode) {
+func (s *Simulator) handleByzantineNode(node *SimulatedNode, msg *SimulatedMessage, allNodes []*SimulatedNode) {
 	// Byzantine behavior: send conflicting messages, delay responses, etc.
 	if rand.Float64() < 0.5 { // #nosec G404 -- non-cryptographic random used for simulation logic
 		// Send conflicting state
+		payload, ok := msg.Payload.(string)
+		if !ok {
+			return
+		}
 		node.mu.Lock()
-		node.TicketState[msg.Payload.(string)] = "INVALID"
+		node.TicketState[payload] = "INVALID"
 		node.mu.Unlock()
 	}
 	// Sometimes don't respond at all (dropped message)
 }
 
 // handleHonestNode handles honest node behavior
-func (s *Simulator) handleHonestNode(node *SimulatedNode, msg SimulatedMessage) {
+func (s *Simulator) handleHonestNode(node *SimulatedNode, msg *SimulatedMessage) {
 	node.mu.Lock()
 	defer node.mu.Unlock()
 
-	switch msg.Type {
-	case "VALIDATE":
-		ticketID := msg.Payload.(string)
-		node.TicketState[ticketID] = "VALIDATED"
-		node.ConsensusLog = append(node.ConsensusLog, ConsensusEntry{
-			Sequence:  len(node.ConsensusLog),
-			TicketID:  ticketID,
-			Operation: "VALIDATE",
-			Timestamp: time.Now(),
-		})
+	if msg.Type != msgTypeValidate {
+		return
 	}
+
+	ticketID, ok := msg.Payload.(string)
+	if !ok {
+		return
+	}
+	node.TicketState[ticketID] = "VALIDATED"
+	node.ConsensusLog = append(node.ConsensusLog, ConsensusEntry{
+		Sequence:  len(node.ConsensusLog),
+		TicketID:  ticketID,
+		Operation: msgTypeValidate,
+		Timestamp: time.Now(),
+	})
 }
 
 // simulateNetworkPartition simulates a network partition

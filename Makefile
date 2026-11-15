@@ -79,7 +79,7 @@ integration-test: test-integration
 # Run linter
 lint:
 	@echo "Running linter..."
-	golangci-lint run ./...
+	golangci-lint run --timeout=5m ./...
 
 # Format code
 fmt:

@@ -85,7 +85,7 @@ func (qc *QuorumChecker) GetMaxByzantineNodes() int {
 // CanTolerateFailures checks if the system can tolerate current failures
 func (qc *QuorumChecker) CanTolerateFailures(activeNodes int) bool {
 	// We need at least 2f+1 active nodes
-	return activeNodes >= 2*qc.f+1
+	return activeNodes > 2*qc.f
 }
 
 // IsValidNetworkSize checks if network size is valid for Byzantine tolerance

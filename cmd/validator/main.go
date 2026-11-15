@@ -23,6 +23,9 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// jsonKeyNodeID is the JSON field name carrying the reporting node's id.
+const jsonKeyNodeID = "node_id"
+
 // protoToState maps protobuf State enum values to internal TicketState.
 var protoToState = map[pb.State]state.TicketState{
 	pb.State_ISSUED:    state.StateIssued,
@@ -151,7 +154,7 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create data directory if it doesn't exist
-	if err := os.MkdirAll(cfg.DataDir, 0750); err != nil {
+	if err := os.MkdirAll(cfg.DataDir, 0o750); err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to create data directory: %w", err)
 	}
@@ -230,7 +233,9 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 		Fanout: 0, // Auto-calculate
 	}, p2pHost)
 	if err != nil {
-		_ = discovery.Close()
+		if cerr := discovery.Close(); cerr != nil {
+			fmt.Printf("Validator: failed to close discovery: %v\n", cerr)
+		}
 		_ = p2pHost.Close()
 		_ = store.Close()
 		cancel()
@@ -249,7 +254,9 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 		ViewTimeout: 15 * time.Second,
 	}, p2pHost)
 	if err != nil {
-		_ = discovery.Close()
+		if cerr := discovery.Close(); cerr != nil {
+			fmt.Printf("Validator: failed to close discovery: %v\n", cerr)
+		}
 		_ = p2pHost.Close()
 		_ = store.Close()
 		cancel()
@@ -284,7 +291,9 @@ func NewValidatorNode(cfg *Config) (*ValidatorNode, error) {
 		APIKey:     cfg.APIKey,
 	}, node)
 	if err != nil {
-		_ = node.Stop()
+		if serr := node.Stop(); serr != nil {
+			fmt.Printf("Validator: failed to stop node after API server init failure: %v\n", serr)
+		}
 		return nil, fmt.Errorf("failed to initialize API server: %w", err)
 	}
 	node.apiServer = apiServer
@@ -381,7 +390,9 @@ func (n *ValidatorNode) Stop() error {
 
 	// Stop API server
 	if n.apiServer != nil {
-		_ = n.apiServer.Close()
+		if err := n.apiServer.Close(); err != nil {
+			fmt.Printf("Validator: failed to close API server: %v\n", err)
+		}
 	}
 
 	// Stop PBFT
@@ -396,7 +407,9 @@ func (n *ValidatorNode) Stop() error {
 
 	// Stop discovery
 	if n.discovery != nil {
-		_ = n.discovery.Close()
+		if err := n.discovery.Close(); err != nil {
+			fmt.Printf("Validator: failed to close discovery: %v\n", err)
+		}
 	}
 
 	// Close P2P host
@@ -457,196 +470,22 @@ func (n *ValidatorNode) setupHandlers() {
 	})
 
 	// Register state handler - enables state synchronization via gossip
-	router.RegisterStateHandler(func(update *pb.StateUpdate) error {
-		// Convert protobuf tickets to state.Ticket format
-		tickets := make([]*state.Ticket, len(update.Tickets))
-		for i, ts := range update.Tickets {
-			ticketState := protoToState[ts.State]
-
-			// Convert vector clock
-			vc := state.NewVectorClock(n.nodeID)
-			if ts.VectorClock != nil {
-				for k, v := range ts.VectorClock.Clocks {
-					vc.Update(k, v)
-				}
-			}
-
-			tickets[i] = &state.Ticket{
-				ID:          ts.TicketId,
-				State:       ticketState,
-				ValidatorID: ts.ValidatorId,
-				Timestamp:   ts.LastUpdated,
-				VectorClock: vc,
-				Data:        ts.Metadata, // Use metadata field for data
-				Metadata:    make(map[string]string),
-			}
-		}
-
-		// Merge state from remote node (FIXES unused MergeState)
-		if err := n.stateMachine.MergeState(tickets); err != nil {
-			return err
-		}
-		// Persist merged tickets to BoltDB so state survives restarts
-		for _, t := range tickets {
-			n.persistTicket(t.ID)
-		}
-		return nil
-	})
+	router.RegisterStateHandler(n.handleStateUpdate)
 
 	// Set router on P2P host
 	n.p2pHost.SetRouter(router)
 
 	// Register state publisher - publishes updates via gossip
-	n.stateMachine.RegisterPublisher(func(ticketID string, ticketState state.TicketState, validatorID string, timestamp int64) error {
-		// Convert internal state to protobuf
-		protoState := stateToProto[ticketState]
-
-		// Create state update message
-		update := &pb.StateUpdate{
-			Tickets: []*pb.TicketState{{
-				TicketId:    ticketID,
-				State:       protoState,
-				ValidatorId: validatorID,
-				LastUpdated: timestamp,
-			}},
-			NodeId: n.nodeID,
-		}
-
-		// Serialize state update
-		payload, err := proto.Marshal(update)
-		if err != nil {
-			return fmt.Errorf("failed to marshal state update: %w", err)
-		}
-
-		// Wrap in ValidatorMessage
-		msg := &pb.ValidatorMessage{
-			Type:      pb.ValidatorMessage_STATE_UPDATE,
-			Payload:   payload,
-			SenderId:  n.nodeID,
-			Timestamp: time.Now().Unix(),
-		}
-
-		data, err := proto.Marshal(msg)
-		if err != nil {
-			return fmt.Errorf("failed to marshal ValidatorMessage: %w", err)
-		}
-
-		// Publish via gossip
-		return n.gossipEngine.Publish(data)
-	})
+	n.stateMachine.RegisterPublisher(n.publishStateUpdate)
 
 	// Register consensus handler
-	n.pbftNode.RegisterHandler(func(req *consensus.Request) error {
-		// Use the originating node's ID from the request so all nodes store the same ValidatorID after consensus commits.
-		validatorID := req.NodeID
-		if validatorID == "" {
-			validatorID = n.nodeID // fallback for older requests without NodeID
-		}
-		var err error
-		switch req.Operation {
-		case "VALIDATE":
-			err = n.stateMachine.ValidateTicket(req.TicketID, validatorID, req.Data)
-		case "CONSUME":
-			err = n.stateMachine.ConsumeTicket(req.TicketID, validatorID)
-		case "DISPUTE":
-			err = n.stateMachine.DisputeTicket(req.TicketID, validatorID)
-		}
-		if err != nil {
-			// Idempotent errors (ticket already in target state) are non-fatal:
-			// they occur during log replay or concurrent consensus rounds.
-			if strings.Contains(err.Error(), "already validated") ||
-				strings.Contains(err.Error(), "already consumed") ||
-				strings.Contains(err.Error(), "already disputed") {
-				fmt.Printf("Consensus handler: idempotent op %s for ticket %s (skipping): %v\n",
-					req.Operation, req.TicketID, err)
-			} else {
-				return err
-			}
-		}
-		// Persist ticket to BoltDB so state survives node restarts
-		n.persistTicket(req.TicketID)
-		return nil
-	})
+	n.pbftNode.RegisterHandler(n.handleConsensusRequest)
 
 	// Register state replicator for reliable state propagation after consensus commits
-	n.pbftNode.RegisterStateReplicator(func(req *consensus.Request) error {
-		// Get the ticket state that was just committed
-		ticket, err := n.stateMachine.GetTicket(req.TicketID)
-		if err != nil {
-			return fmt.Errorf("failed to get committed ticket state: %w", err)
-		}
-
-		// Convert to protobuf state (default to PENDING for unmapped states)
-		protoState, ok := stateToProto[ticket.State]
-		if !ok {
-			protoState = pb.State_PENDING
-		}
-
-		// Convert vector clock to protobuf format for proper causality ordering on receiving nodes (ensures MergeState can correctly compare versions)
-		var protoVC *pb.VectorClock
-		if ticket.VectorClock != nil {
-			protoVC = &pb.VectorClock{
-				Clocks: ticket.VectorClock.GetAll(),
-			}
-		}
-
-		// Create state update message with consensus confirmation.
-		update := &pb.StateUpdate{
-			Tickets: []*pb.TicketState{{
-				TicketId:    ticket.ID,
-				State:       protoState,
-				ValidatorId: ticket.ValidatorID,
-				LastUpdated: ticket.Timestamp,
-				VectorClock: protoVC,
-				Metadata:    ticket.Data,
-			}},
-			NodeId: n.nodeID,
-		}
-
-		// Serialize state update
-		payload, err := proto.Marshal(update)
-		if err != nil {
-			return fmt.Errorf("failed to marshal state update: %w", err)
-		}
-
-		// Wrap in ValidatorMessage with STATE_UPDATE type
-		msg := &pb.ValidatorMessage{
-			Type:      pb.ValidatorMessage_STATE_UPDATE,
-			Payload:   payload,
-			SenderId:  n.nodeID,
-			Timestamp: time.Now().Unix(),
-		}
-
-		data, err := proto.Marshal(msg)
-		if err != nil {
-			return fmt.Errorf("failed to marshal ValidatorMessage: %w", err)
-		}
-
-		// Broadcast directly to ALL peers (reliable delivery, not probabilistic gossip)
-		ctx, cancel := context.WithTimeout(n.ctx, 5*time.Second)
-		defer cancel()
-
-		if err := n.p2pHost.Broadcast(ctx, data); err != nil {
-			return fmt.Errorf("failed to broadcast state update: %w", err)
-		}
-
-		return nil
-	})
+	n.pbftNode.RegisterStateReplicator(n.replicateState)
 
 	// Register state machine handler
-	n.stateMachine.RegisterHandler(func(ticket *state.Ticket, oldState, newState state.TicketState) error {
-		// Persist to storage
-		record := &storage.TicketRecord{
-			ID:          ticket.ID,
-			State:       string(ticket.State),
-			Data:        ticket.Data,
-			ValidatorID: ticket.ValidatorID,
-			Timestamp:   ticket.Timestamp,
-			VectorClock: ticket.VectorClock.GetAll(),
-			Metadata:    ticket.Metadata,
-		}
-		return n.storage.SaveTicket(record)
-	})
+	n.stateMachine.RegisterHandler(n.persistStateChange)
 
 	// Register gossip handler
 	n.gossipEngine.RegisterHandler(func(msg *gossip.Message) error {
@@ -670,6 +509,198 @@ func (n *ValidatorNode) setupHandlers() {
 			return fmt.Errorf("unknown state sync message type: %v", msgType)
 		}
 	})
+}
+
+// handleStateUpdate merges a state update received from a peer into the local
+// state machine and persists the merged tickets.
+func (n *ValidatorNode) handleStateUpdate(update *pb.StateUpdate) error {
+	// Convert protobuf tickets to state.Ticket format
+	tickets := make([]*state.Ticket, len(update.Tickets))
+	for i, ts := range update.Tickets {
+		ticketState := protoToState[ts.State]
+
+		// Convert vector clock
+		vc := state.NewVectorClock(n.nodeID)
+		if ts.VectorClock != nil {
+			for k, v := range ts.VectorClock.Clocks {
+				vc.Update(k, v)
+			}
+		}
+
+		tickets[i] = &state.Ticket{
+			ID:          ts.TicketId,
+			State:       ticketState,
+			ValidatorID: ts.ValidatorId,
+			Timestamp:   ts.LastUpdated,
+			VectorClock: vc,
+			Data:        ts.Metadata, // Use metadata field for data
+			Metadata:    make(map[string]string),
+		}
+	}
+
+	// Merge state from remote node (FIXES unused MergeState)
+	if err := n.stateMachine.MergeState(tickets); err != nil {
+		return err
+	}
+	// Persist merged tickets to BoltDB so state survives restarts
+	for _, t := range tickets {
+		n.persistTicket(t.ID)
+	}
+	return nil
+}
+
+// publishStateUpdate publishes a local state change to the gossip network.
+func (n *ValidatorNode) publishStateUpdate(ticketID string, ticketState state.TicketState, validatorID string, timestamp int64) error {
+	// Convert internal state to protobuf
+	protoState := stateToProto[ticketState]
+
+	// Create state update message
+	update := &pb.StateUpdate{
+		Tickets: []*pb.TicketState{{
+			TicketId:    ticketID,
+			State:       protoState,
+			ValidatorId: validatorID,
+			LastUpdated: timestamp,
+		}},
+		NodeId: n.nodeID,
+	}
+
+	// Serialize state update
+	payload, err := proto.Marshal(update)
+	if err != nil {
+		return fmt.Errorf("failed to marshal state update: %w", err)
+	}
+
+	// Wrap in ValidatorMessage
+	msg := &pb.ValidatorMessage{
+		Type:      pb.ValidatorMessage_STATE_UPDATE,
+		Payload:   payload,
+		SenderId:  n.nodeID,
+		Timestamp: time.Now().Unix(),
+	}
+
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal ValidatorMessage: %w", err)
+	}
+
+	// Publish via gossip
+	return n.gossipEngine.Publish(data)
+}
+
+// handleConsensusRequest applies a committed consensus request to the local
+// state machine.
+func (n *ValidatorNode) handleConsensusRequest(req *consensus.Request) error {
+	// Use the originating node's ID from the request so all nodes store the same ValidatorID after consensus commits.
+	validatorID := req.NodeID
+	if validatorID == "" {
+		validatorID = n.nodeID // fallback for older requests without NodeID
+	}
+	var err error
+	switch req.Operation {
+	case "VALIDATE":
+		err = n.stateMachine.ValidateTicket(req.TicketID, validatorID, req.Data)
+	case "CONSUME":
+		err = n.stateMachine.ConsumeTicket(req.TicketID, validatorID)
+	case "DISPUTE":
+		err = n.stateMachine.DisputeTicket(req.TicketID, validatorID)
+	}
+	if err != nil {
+		// Idempotent errors (ticket already in target state) are non-fatal:
+		// they occur during log replay or concurrent consensus rounds.
+		if strings.Contains(err.Error(), "already validated") ||
+			strings.Contains(err.Error(), "already consumed") ||
+			strings.Contains(err.Error(), "already disputed") {
+			fmt.Printf("Consensus handler: idempotent op %s for ticket %s (skipping): %v\n",
+				req.Operation, req.TicketID, err)
+		} else {
+			return err
+		}
+	}
+	// Persist ticket to BoltDB so state survives node restarts
+	n.persistTicket(req.TicketID)
+	return nil
+}
+
+// replicateState broadcasts a committed state change to all peers so the
+// replication is reliable rather than probabilistic.
+func (n *ValidatorNode) replicateState(req *consensus.Request) error {
+	// Get the ticket state that was just committed
+	ticket, err := n.stateMachine.GetTicket(req.TicketID)
+	if err != nil {
+		return fmt.Errorf("failed to get committed ticket state: %w", err)
+	}
+
+	// Convert to protobuf state (default to PENDING for unmapped states)
+	protoState, ok := stateToProto[ticket.State]
+	if !ok {
+		protoState = pb.State_PENDING
+	}
+
+	// Convert vector clock to protobuf format for proper causality ordering on receiving nodes (ensures MergeState can correctly compare versions)
+	var protoVC *pb.VectorClock
+	if ticket.VectorClock != nil {
+		protoVC = &pb.VectorClock{
+			Clocks: ticket.VectorClock.GetAll(),
+		}
+	}
+
+	// Create state update message with consensus confirmation.
+	update := &pb.StateUpdate{
+		Tickets: []*pb.TicketState{{
+			TicketId:    ticket.ID,
+			State:       protoState,
+			ValidatorId: ticket.ValidatorID,
+			LastUpdated: ticket.Timestamp,
+			VectorClock: protoVC,
+			Metadata:    ticket.Data,
+		}},
+		NodeId: n.nodeID,
+	}
+
+	// Serialize state update
+	payload, err := proto.Marshal(update)
+	if err != nil {
+		return fmt.Errorf("failed to marshal state update: %w", err)
+	}
+
+	// Wrap in ValidatorMessage with STATE_UPDATE type
+	msg := &pb.ValidatorMessage{
+		Type:      pb.ValidatorMessage_STATE_UPDATE,
+		Payload:   payload,
+		SenderId:  n.nodeID,
+		Timestamp: time.Now().Unix(),
+	}
+
+	data, err := proto.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("failed to marshal ValidatorMessage: %w", err)
+	}
+
+	// Broadcast directly to ALL peers (reliable delivery, not probabilistic gossip)
+	ctx, cancel := context.WithTimeout(n.ctx, 5*time.Second)
+	defer cancel()
+
+	if err := n.p2pHost.Broadcast(ctx, data); err != nil {
+		return fmt.Errorf("failed to broadcast state update: %w", err)
+	}
+
+	return nil
+}
+
+// persistStateChange stores a state change in BoltDB.
+func (n *ValidatorNode) persistStateChange(ticket *state.Ticket, oldState, newState state.TicketState) error {
+	// Persist to storage
+	record := &storage.TicketRecord{
+		ID:          ticket.ID,
+		State:       string(ticket.State),
+		Data:        ticket.Data,
+		ValidatorID: ticket.ValidatorID,
+		Timestamp:   ticket.Timestamp,
+		VectorClock: ticket.VectorClock.GetAll(),
+		Metadata:    ticket.Metadata,
+	}
+	return n.storage.SaveTicket(record)
 }
 
 // setupPeerCallbacks sets up callbacks for peer connection events
@@ -829,7 +860,8 @@ func (n *ValidatorNode) handleStateSyncResponse(payload []byte) error {
 	currentSeq := n.pbftNode.GetSequence()
 
 	// If peer has newer state, synchronize
-	if response.CurrentSequence > currentSeq {
+	switch {
+	case response.CurrentSequence > currentSeq:
 		fmt.Printf("StateSync: ⚠️  Peer %s has newer state (peer seq: %d, our seq: %d)\n",
 			response.ResponderId, response.CurrentSequence, currentSeq)
 
@@ -857,10 +889,10 @@ func (n *ValidatorNode) handleStateSyncResponse(payload []byte) error {
 		}
 
 		fmt.Printf("StateSync: ✅ Synchronized %d tickets from peer %s\n", syncedCount, response.ResponderId)
-	} else if response.CurrentSequence == currentSeq {
+	case response.CurrentSequence == currentSeq:
 		fmt.Printf("StateSync: ✅ State is synchronized with peer %s (seq: %d)\n",
 			response.ResponderId, currentSeq)
-	} else {
+	default:
 		fmt.Printf("StateSync: ℹ️  Our state is newer than peer %s (our seq: %d, peer seq: %d)\n",
 			response.ResponderId, currentSeq, response.CurrentSequence)
 	}
@@ -890,63 +922,106 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 
 	// If this node is the primary, propose and wait for consensus
 	if n.pbftNode.IsPrimary() {
-		fmt.Printf("Node %s: ✅ Received validation request for ticket %s (I am primary)\n", n.nodeID, ticketID)
-
-		// Check peer connectivity for multi-node setup.
-		peerCount := n.p2pHost.GetPeerCount()
-		f := (n.totalNodes - 1) / 3 // max Byzantine faults
-		minPeers := 2 * f           // minimum peers needed (quorum = 2f+1, minus self)
-
-		if n.totalNodes > 1 && peerCount < minPeers {
-			return fmt.Errorf("not enough peers for consensus: have %d, need at least %d (quorum requires %d of %d nodes)", peerCount, minPeers, 2*f+1, n.totalNodes)
-		}
-		if peerCount < n.totalNodes-1 {
-			fmt.Printf("Node %s: ⚠️  WARNING - only %d/%d peers connected (minimum %d for consensus)\n", n.nodeID, peerCount, n.totalNodes-1, minPeers)
-		}
-
-		// Create result channel for synchronous waiting
-		resultChan := make(chan error, 1)
-
-		// Register callback to be notified when consensus completes
-		n.pbftNode.RegisterCallback(requestID, func(success bool, err error) {
-			if success {
-				resultChan <- nil
-			} else {
-				if err != nil {
-					resultChan <- err
-				} else {
-					resultChan <- fmt.Errorf("consensus failed for ticket %s", ticketID)
-				}
-			}
-		})
-
-		// Propose the request (non-blocking, consensus runs asynchronously)
-		if err := n.pbftNode.ProposeRequest(req); err != nil {
-			// Proposal failed, no need to wait for callback
-			return err
-		}
-
-		// Wait for consensus to complete or timeout
-		consensusTimeout := 20 * time.Second
-		select {
-		case err := <-resultChan:
-			if err != nil {
-				return fmt.Errorf("consensus failed: %w", err)
-			}
-			fmt.Printf("Node %s: ✅ Consensus completed successfully for ticket %s\n", n.nodeID, ticketID)
-			return nil
-		case <-time.After(consensusTimeout):
-			return fmt.Errorf("consensus timeout: validation for ticket %s did not complete within %v", ticketID, consensusTimeout)
-		case <-n.ctx.Done():
-			return fmt.Errorf("node shutting down")
-		}
+		return n.validateAsPrimary(requestID, ticketID, req)
 	}
 
 	// Non-primary nodes forward the request to all peers (primary will handle it)
+	return n.validateAsForwarder(ticketID, req)
+}
+
+// validateAsPrimary proposes the validation request to consensus and waits for
+// the consensus outcome.
+func (n *ValidatorNode) validateAsPrimary(requestID, ticketID string, req *consensus.Request) error {
+	fmt.Printf("Node %s: ✅ Received validation request for ticket %s (I am primary)\n", n.nodeID, ticketID)
+
+	if err := n.checkPrimaryPeerConnectivity(); err != nil {
+		return err
+	}
+
+	// Create result channel for synchronous waiting
+	resultChan := make(chan error, 1)
+
+	// Register callback to be notified when consensus completes
+	n.pbftNode.RegisterCallback(requestID, func(success bool, err error) {
+		resultChan <- consensusCallbackError(success, err, ticketID)
+	})
+
+	// Propose the request (non-blocking, consensus runs asynchronously)
+	if err := n.pbftNode.ProposeRequest(req); err != nil {
+		// Proposal failed, no need to wait for callback
+		return err
+	}
+
+	// Wait for consensus to complete or timeout
+	consensusTimeout := 20 * time.Second
+	select {
+	case err := <-resultChan:
+		if err != nil {
+			return fmt.Errorf("consensus failed: %w", err)
+		}
+		fmt.Printf("Node %s: ✅ Consensus completed successfully for ticket %s\n", n.nodeID, ticketID)
+		return nil
+	case <-time.After(consensusTimeout):
+		return fmt.Errorf("consensus timeout: validation for ticket %s did not complete within %v", ticketID, consensusTimeout)
+	case <-n.ctx.Done():
+		return fmt.Errorf("node shutting down")
+	}
+}
+
+// checkPrimaryPeerConnectivity verifies that enough peers are connected for the
+// primary to reach a quorum.
+func (n *ValidatorNode) checkPrimaryPeerConnectivity() error {
+	// Check peer connectivity for multi-node setup.
+	peerCount := n.p2pHost.GetPeerCount()
+	f := (n.totalNodes - 1) / 3 // max Byzantine faults
+	minPeers := 2 * f           // minimum peers needed (quorum = 2f+1, minus self)
+
+	if n.totalNodes > 1 && peerCount < minPeers {
+		return fmt.Errorf("not enough peers for consensus: have %d, need at least %d (quorum requires %d of %d nodes)", peerCount, minPeers, 2*f+1, n.totalNodes)
+	}
+	if peerCount < n.totalNodes-1 {
+		fmt.Printf("Node %s: ⚠️  WARNING - only %d/%d peers connected (minimum %d for consensus)\n", n.nodeID, peerCount, n.totalNodes-1, minPeers)
+	}
+	return nil
+}
+
+// consensusCallbackError converts a consensus callback outcome into the error
+// the waiting caller observes. A nil error means consensus succeeded.
+func consensusCallbackError(success bool, err error, ticketID string) error {
+	if success {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf("consensus failed for ticket %s", ticketID)
+}
+
+// validateAsForwarder forwards the validation request to the primary and waits
+// for the committed state to be replicated back to this node.
+func (n *ValidatorNode) validateAsForwarder(ticketID string, req *consensus.Request) error {
 	primary := n.pbftNode.GetPrimary()
 	fmt.Printf("Node %s: 📤 Forwarding validation request for ticket %s to primary %s\n", n.nodeID, ticketID, primary)
 
 	// Wait for peers to connect (with retry)
+	peerCount, err := n.waitForPeers(primary)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Node %s: ✅ Connected to %d peer(s), forwarding request\n", n.nodeID, peerCount)
+
+	msgData, err := n.broadcastClientRequest(req)
+	if err != nil {
+		return err
+	}
+
+	return n.awaitReplicatedValidation(ticketID, msgData, peerCount)
+}
+
+// waitForPeers waits until at least one peer is connected, retrying a few
+// times to give peer discovery a chance to complete.
+func (n *ValidatorNode) waitForPeers(primary string) (int, error) {
 	maxRetries := 5
 	retryDelay := 1 * time.Second
 	var peerCount int
@@ -967,36 +1042,46 @@ func (n *ValidatorNode) ValidateTicket(ticketID string, data []byte) error {
 		case <-time.After(retryDelay):
 			continue
 		case <-n.ctx.Done():
-			return fmt.Errorf("node shutting down")
+			return 0, fmt.Errorf("node shutting down")
 		}
 	}
 
 	if peerCount == 0 {
-		return fmt.Errorf("no peers connected after %d attempts, cannot forward request to primary %s. Please wait for peer discovery to complete", maxRetries, primary)
+		return 0, fmt.Errorf("no peers connected after %d attempts, cannot forward request to primary %s. Please wait for peer discovery to complete", maxRetries, primary)
 	}
 
-	fmt.Printf("Node %s: ✅ Connected to %d peer(s), forwarding request\n", n.nodeID, peerCount)
+	return peerCount, nil
+}
 
+// broadcastClientRequest serializes the consensus request and broadcasts it to
+// all peers; the primary picks it up.
+func (n *ValidatorNode) broadcastClientRequest(req *consensus.Request) ([]byte, error) {
 	// Serialize the request
 	payload, err := consensus.SerializeRequest(req)
 	if err != nil {
-		return fmt.Errorf("failed to serialize request: %w", err)
+		return nil, fmt.Errorf("failed to serialize request: %w", err)
 	}
 
 	// Wrap in ValidatorMessage with CLIENT_REQUEST type
 	msgData, err := consensus.SerializePBFTMessage(pb.ValidatorMessage_CLIENT_REQUEST, payload, n.nodeID)
 	if err != nil {
-		return fmt.Errorf("failed to wrap client request: %w", err)
+		return nil, fmt.Errorf("failed to wrap client request: %w", err)
 	}
 
 	// Broadcast to all peers (primary will pick it up)
 	broadcastCtx, broadcastCancel := context.WithTimeout(n.ctx, 3*time.Second)
 	if err := n.p2pHost.Broadcast(broadcastCtx, msgData); err != nil {
 		broadcastCancel()
-		return fmt.Errorf("failed to forward request to primary: %w", err)
+		return nil, fmt.Errorf("failed to forward request to primary: %w", err)
 	}
 	broadcastCancel()
 
+	return msgData, nil
+}
+
+// awaitReplicatedValidation waits for the committed validation to be replicated
+// to this node.
+func (n *ValidatorNode) awaitReplicatedValidation(ticketID string, msgData []byte, peerCount int) error {
 	fmt.Printf("Node %s: 📤 Successfully forwarded request for ticket %s to %d peers, waiting for consensus...\n", n.nodeID, ticketID, peerCount)
 
 	// Arm the PBFT view change timer for dead primary detection.
@@ -1066,7 +1151,7 @@ func (n *ValidatorNode) GetAllTickets() ([]interface{}, error) {
 
 func (n *ValidatorNode) GetStats() map[string]interface{} {
 	return map[string]interface{}{
-		"node_id":       n.nodeID,
+		jsonKeyNodeID:   n.nodeID,
 		"peer_count":    n.p2pHost.GetPeerCount(),
 		"is_primary":    n.pbftNode.IsPrimary(),
 		"current_view":  n.pbftNode.GetView(),
@@ -1099,7 +1184,7 @@ func (n *ValidatorNode) GetPeers() ([]api.PeerInfo, error) {
 
 func (n *ValidatorNode) GetConfig() (interface{}, error) {
 	return map[string]interface{}{
-		"node_id":      n.nodeID,
+		jsonKeyNodeID:  n.nodeID,
 		"total_nodes":  n.totalNodes,
 		"is_primary":   n.pbftNode.IsPrimary(),
 		"current_view": n.pbftNode.GetView(),
@@ -1140,7 +1225,7 @@ func (n *ValidatorNode) GetNodeCryptoInfo() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"node_id":            n.nodeID,
+		jsonKeyNodeID:        n.nodeID,
 		"peer_id":            peerID.String(),
 		"public_key":         publicKeyHex,
 		"key_algorithm":      keyAlgorithm,
@@ -1160,7 +1245,10 @@ func (n *ValidatorNode) GetStorageEntries() map[string]interface{} {
 	}
 
 	// Consensus log count
-	consensusLogs, _ := n.storage.GetConsensusLogs()
+	consensusLogs, err := n.storage.GetConsensusLogs()
+	if err != nil {
+		fmt.Printf("Validator: failed to get consensus logs: %v\n", err)
+	}
 	consensusLogCount := 0
 	if consensusLogs != nil {
 		consensusLogCount = len(consensusLogs)
@@ -1174,7 +1262,7 @@ func (n *ValidatorNode) GetStorageEntries() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"node_id":             n.nodeID,
+		jsonKeyNodeID:         n.nodeID,
 		"total_tickets":       len(allTickets),
 		"ticket_states":       stateCounts,
 		"consensus_log_count": consensusLogCount,
@@ -1263,9 +1351,10 @@ func (n *ValidatorNode) SeedTickets() (int, error) {
 		sectionIdx := (i - 1) % len(sections)
 		seatRow := string(rune('A' + ((i-1)/10)%26))
 		seatNum := (i-1)%10 + 1
+		seat := fmt.Sprintf("%s%d", seatRow, seatNum)
 
-		data := fmt.Sprintf(`{"event":"Summer Music Festival 2026","venue":"Grand Arena","section":"%s","seat":"%s%d","price":"%s","buyer":"buyer_%03d@email.com"}`,
-			sections[sectionIdx], seatRow, seatNum, prices[sectionIdx], i)
+		data := fmt.Sprintf(`{"event":"Summer Music Festival 2026","venue":"Grand Arena","section":%q,"seat":%q,"price":%q,"buyer":"buyer_%03d@email.com"}`,
+			sections[sectionIdx], seat, prices[sectionIdx], i)
 
 		tickets = append(tickets, &state.Ticket{
 			ID:        ticketID,

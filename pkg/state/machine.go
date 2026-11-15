@@ -114,7 +114,7 @@ func (sm *StateMachine) SeedTickets(tickets []*Ticket) (int, error) {
 
 // ValidateTicket validates a ticket and transitions it from ISSUED to VALIDATED state.
 // The ticket must already exist
-func (sm *StateMachine) ValidateTicket(ticketID string, validatorID string, data []byte) error {
+func (sm *StateMachine) ValidateTicket(ticketID, validatorID string, data []byte) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -178,7 +178,7 @@ func (sm *StateMachine) ValidateTicket(ticketID string, validatorID string, data
 }
 
 // ConsumeTicket marks a ticket as consumed
-func (sm *StateMachine) ConsumeTicket(ticketID string, validatorID string) error {
+func (sm *StateMachine) ConsumeTicket(ticketID, validatorID string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -229,7 +229,7 @@ func (sm *StateMachine) ConsumeTicket(ticketID string, validatorID string) error
 }
 
 // DisputeTicket marks a ticket as disputed
-func (sm *StateMachine) DisputeTicket(ticketID string, validatorID string) error {
+func (sm *StateMachine) DisputeTicket(ticketID, validatorID string) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -412,7 +412,7 @@ func (sm *StateMachine) HasTicket(ticketID string) bool {
 
 // SyncTicket synchronizes a ticket from another node (bypassing consensus)
 // This is used when a node joins and needs to catch up with existing state
-func (sm *StateMachine) SyncTicket(ticketID string, validatorID string, data []byte) error {
+func (sm *StateMachine) SyncTicket(ticketID, validatorID string, data []byte) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -520,9 +520,9 @@ func (sn *StateNotifier) Notify(ticketID string, newState TicketState) {
 // Helper functions
 
 func copyMetadata(metadata map[string]string) map[string]string {
-	copy := make(map[string]string, len(metadata))
+	result := make(map[string]string, len(metadata))
 	for k, v := range metadata {
-		copy[k] = v
+		result[k] = v
 	}
-	return copy
+	return result
 }

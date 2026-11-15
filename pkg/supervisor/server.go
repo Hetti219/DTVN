@@ -1,6 +1,7 @@
 package supervisor
 
 import (
+	"bytes"
 	"context"
 	"crypto/subtle"
 	"encoding/json"
@@ -111,18 +112,18 @@ func NewServer(cfg *ServerConfig) *Server {
 			s.outputMu.Unlock()
 
 			s.broadcastWSMessage(map[string]interface{}{
-				"type":    "node_output",
-				"node_id": nodeID,
-				"line":    line,
+				jsonKeyType:   "node_output",
+				jsonKeyNodeID: nodeID,
+				"line":        line,
 			})
 		},
 		StatusCallback: func(nodeID string, status NodeStatus) {
 			// Send full node info so the frontend can add new nodes it doesn't know about
 			node, err := s.nodeManager.GetNode(nodeID)
 			msg := map[string]interface{}{
-				"type":    "node_status",
-				"node_id": nodeID,
-				"status":  status,
+				jsonKeyType:   "node_status",
+				jsonKeyNodeID: nodeID,
+				jsonKeyStatus: status,
 			}
 			if err == nil && node != nil {
 				msg["node"] = node
@@ -131,8 +132,8 @@ func NewServer(cfg *ServerConfig) *Server {
 		},
 		ClusterCallback: func(status ClusterStatus, nodesStarted int, nodesTotal int) {
 			s.broadcastWSMessage(map[string]interface{}{
-				"type":          "cluster_status",
-				"status":        status,
+				jsonKeyType:     "cluster_status",
+				jsonKeyStatus:   status,
 				"nodes_started": nodesStarted,
 				"nodes_total":   nodesTotal,
 			})
@@ -144,26 +145,26 @@ func NewServer(cfg *ServerConfig) *Server {
 		SimulatorPath: cfg.SimulatorPath,
 		OutputCallback: func(line string) {
 			s.broadcastWSMessage(map[string]interface{}{
-				"type": "simulator_output",
-				"line": line,
+				jsonKeyType: "simulator_output",
+				"line":      line,
 			})
 		},
 		ProgressCallback: func(progress *SimulatorProgress) {
 			s.broadcastWSMessage(map[string]interface{}{
-				"type":     "simulator_progress",
-				"progress": progress,
+				jsonKeyType: "simulator_progress",
+				"progress":  progress,
 			})
 		},
 		StatusCallback: func(status SimulatorStatus) {
 			s.broadcastWSMessage(map[string]interface{}{
-				"type":   "simulator_status",
-				"status": status,
+				jsonKeyType:   "simulator_status",
+				jsonKeyStatus: status,
 			})
 		},
 		ResultCallback: func(results *SimulatorResults) {
 			s.broadcastWSMessage(map[string]interface{}{
-				"type":    "simulator_results",
-				"results": results,
+				jsonKeyType: "simulator_results",
+				"results":   results,
 			})
 		},
 	})
@@ -296,13 +297,17 @@ func (s *Server) Stop(ctx context.Context) error {
 
 	// Stop simulator if running
 	if s.simController.GetStatus() == SimulatorStatusRunning {
-		_ = s.simController.Stop()
+		if err := s.simController.Stop(); err != nil {
+			fmt.Printf("Supervisor: failed to stop simulator: %v\n", err)
+		}
 	}
 
 	// Close all WebSocket connections
 	s.wsMu.Lock()
 	for conn := range s.wsClients {
-		_ = conn.Close()
+		if err := conn.Close(); err != nil {
+			fmt.Printf("Supervisor: failed to close WebSocket connection: %v\n", err)
+		}
 	}
 	s.wsClients = make(map[*websocket.Conn]bool)
 	s.wsMu.Unlock()
@@ -330,7 +335,13 @@ func (s *Server) wsBroadcastPump() {
 			var deadClients []*websocket.Conn
 			for _, conn := range clients {
 				// Set a write deadline so a slow client can't block the pump
-				_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+				if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+					// Without a deadline the write could block the pump forever,
+					// so treat the client as dead.
+					fmt.Printf("Supervisor: failed to set WebSocket write deadline: %v\n", err)
+					deadClients = append(deadClients, conn)
+					continue
+				}
 				if err := conn.WriteJSON(msg); err != nil {
 					deadClients = append(deadClients, conn)
 				}
@@ -341,7 +352,9 @@ func (s *Server) wsBroadcastPump() {
 				s.wsMu.Lock()
 				for _, conn := range deadClients {
 					delete(s.wsClients, conn)
-					_ = conn.Close()
+					if err := conn.Close(); err != nil {
+						fmt.Printf("Supervisor: failed to close WebSocket connection: %v\n", err)
+					}
 				}
 				s.wsMu.Unlock()
 			}
@@ -388,8 +401,8 @@ func (s *Server) refreshPrimaryStatus() {
 		wg.Add(1)
 		go func(n *ManagedNode) {
 			defer wg.Done()
-			url := fmt.Sprintf("http://127.0.0.1:%d", n.APIPort)
-			isPrimary, err := s.checkNodeIsPrimary(url)
+			nodeURL := fmt.Sprintf("http://127.0.0.1:%d", n.APIPort)
+			isPrimary, err := s.checkNodeIsPrimary(nodeURL)
 			if err != nil {
 				return
 			}
@@ -411,10 +424,10 @@ func (s *Server) refreshPrimaryStatus() {
 				continue
 			}
 			s.broadcastWSMessage(map[string]interface{}{
-				"type":    "node_status",
-				"node_id": res.nodeID,
-				"status":  updatedNode.Status,
-				"node":    updatedNode,
+				jsonKeyType:   "node_status",
+				jsonKeyNodeID: res.nodeID,
+				jsonKeyStatus: updatedNode.Status,
+				"node":        updatedNode,
 			})
 		}
 	}
@@ -427,10 +440,10 @@ func (s *Server) handleGetStatus(w http.ResponseWriter, r *http.Request) {
 	simStatus := s.simController.GetStatus()
 
 	status := map[string]interface{}{
-		"supervisor":       "running",
-		"nodes_count":      len(nodes),
-		"nodes":            nodes,
-		"simulator_status": simStatus,
+		jsonKeySupervisor:      "running",
+		jsonKeyNodesCount:      len(nodes),
+		jsonKeyNodes:           nodes,
+		jsonKeySimulatorStatus: simStatus,
 	}
 
 	s.writeJSON(w, status)
@@ -481,8 +494,8 @@ func (s *Server) handleStartNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, map[string]string{
-		"status":  "starting",
-		"node_id": req.NodeID,
+		jsonKeyStatus: "starting",
+		jsonKeyNodeID: req.NodeID,
 	})
 }
 
@@ -496,8 +509,8 @@ func (s *Server) handleStopNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, map[string]string{
-		"status":  "stopping",
-		"node_id": nodeID,
+		jsonKeyStatus: string(NodeStatusStopping),
+		jsonKeyNodeID: nodeID,
 	})
 }
 
@@ -529,8 +542,8 @@ func (s *Server) handleRestartNode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, map[string]string{
-		"status":  "restarting",
-		"node_id": nodeID,
+		jsonKeyStatus: "restarting",
+		jsonKeyNodeID: nodeID,
 	})
 }
 
@@ -545,8 +558,8 @@ func (s *Server) handleGetNodeLogs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, map[string]interface{}{
-		"node_id": nodeID,
-		"logs":    logs,
+		jsonKeyNodeID: nodeID,
+		"logs":        logs,
 	})
 }
 
@@ -572,8 +585,8 @@ func (s *Server) handleStartCluster(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, map[string]interface{}{
-		"status":     "starting",
-		"node_count": req.NodeCount,
+		jsonKeyStatus: "starting",
+		"node_count":  req.NodeCount,
 	})
 }
 
@@ -581,7 +594,7 @@ func (s *Server) handleStopCluster(w http.ResponseWriter, r *http.Request) {
 	s.nodeManager.StopAllNodes()
 
 	s.writeJSON(w, map[string]string{
-		"status": "stopping",
+		jsonKeyStatus: string(NodeStatusStopping),
 	})
 }
 
@@ -611,8 +624,8 @@ func (s *Server) handleStartSimulator(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, map[string]interface{}{
-		"status": "started",
-		"config": config,
+		jsonKeyStatus: "started",
+		"config":      config,
 	})
 }
 
@@ -623,7 +636,7 @@ func (s *Server) handleStopSimulator(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.writeJSON(w, map[string]string{
-		"status": "stopping",
+		jsonKeyStatus: string(NodeStatusStopping),
 	})
 }
 
@@ -657,10 +670,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Send initial state
 	s.sendWSMessage(conn, map[string]interface{}{
-		"type":             "connected",
-		"nodes":            s.nodeManager.GetAllNodes(),
-		"simulator_status": s.simController.GetStatus(),
-		"cluster_status":   s.nodeManager.GetClusterStatus(),
+		jsonKeyType:            "connected",
+		jsonKeyNodes:           s.nodeManager.GetAllNodes(),
+		jsonKeySimulatorStatus: s.simController.GetStatus(),
+		"cluster_status":       s.nodeManager.GetClusterStatus(),
 	})
 
 	// Handle incoming messages
@@ -672,7 +685,9 @@ func (s *Server) handleWSMessages(conn *websocket.Conn) {
 		s.wsMu.Lock()
 		delete(s.wsClients, conn)
 		s.wsMu.Unlock()
-		_ = conn.Close()
+		if err := conn.Close(); err != nil {
+			fmt.Printf("Supervisor: failed to close WebSocket connection: %v\n", err)
+		}
 	}()
 
 	for {
@@ -687,20 +702,26 @@ func (s *Server) handleWSMessages(conn *websocket.Conn) {
 		// Handle ping messages
 		if msgType, ok := msg["type"].(string); ok && msgType == "ping" {
 			s.sendWSMessage(conn, map[string]interface{}{
-				"type": "pong",
+				jsonKeyType: "pong",
 			})
 		}
 	}
 }
 
 func (s *Server) sendWSMessage(conn *websocket.Conn, msg map[string]interface{}) {
-	_ = conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+	if err := conn.SetWriteDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		// The write is still attempted; the deadline only bounds how long a
+		// stalled client can block this call.
+		fmt.Printf("Supervisor: failed to set WebSocket write deadline: %v\n", err)
+	}
 	if err := conn.WriteJSON(msg); err != nil {
 		// Remove dead client
 		s.wsMu.Lock()
 		delete(s.wsClients, conn)
 		s.wsMu.Unlock()
-		_ = conn.Close()
+		if err := conn.Close(); err != nil {
+			fmt.Printf("Supervisor: failed to close WebSocket connection: %v\n", err)
+		}
 	}
 }
 
@@ -776,11 +797,7 @@ func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
 
 		// Constant-time comparison to prevent timing attacks
 		if subtle.ConstantTimeCompare([]byte(key), []byte(s.apiKey)) != 1 {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusUnauthorized)
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"error": "Invalid or missing API key",
-			})
+			s.writeError(w, http.StatusUnauthorized, "Invalid or missing API key")
 			return
 		}
 
@@ -790,15 +807,44 @@ func (s *Server) apiKeyMiddleware(next http.Handler) http.Handler {
 
 // Helper methods
 
+// encodeJSON serialises payload as JSON. The response helpers use it so that
+// an encoding failure can be reported to the client instead of producing a
+// truncated response body.
+func encodeJSON(payload interface{}) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(payload); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func (s *Server) writeJSON(w http.ResponseWriter, data interface{}) {
+	body, err := encodeJSON(data)
+	if err != nil {
+		fmt.Printf("Supervisor: failed to encode JSON response: %v\n", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		return
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(data)
+	if _, err := w.Write(body); err != nil {
+		fmt.Printf("Supervisor: failed to write JSON response: %v\n", err)
+	}
 }
 
 func (s *Server) writeError(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]string{
+	body, err := encodeJSON(map[string]string{
 		"error": message,
 	})
+	if err != nil {
+		fmt.Printf("Supervisor: failed to encode error response: %v\n", err)
+		http.Error(w, message, status)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	if _, err := w.Write(body); err != nil {
+		fmt.Printf("Supervisor: failed to write error response: %v\n", err)
+	}
 }

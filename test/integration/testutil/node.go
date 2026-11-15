@@ -19,6 +19,9 @@ import (
 	"github.com/libp2p/go-libp2p/core/peer"
 )
 
+// jsonKeyTicketID is the JSON field name carrying a ticket identifier.
+const jsonKeyTicketID = "ticket_id"
+
 // TestNode represents a validator node under test
 type TestNode struct {
 	ID            string
@@ -81,11 +84,11 @@ func NewTestNode(cfg *NodeConfig) (*TestNode, error) {
 	dataDir := filepath.Join(cfg.DataDir, nodeID)
 
 	// Create directories
-	if err := os.MkdirAll(dataDir, 0750); err != nil {
+	if err := os.MkdirAll(dataDir, 0o750); err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to create data dir: %w", err)
 	}
-	if err := os.MkdirAll(cfg.LogsDir, 0750); err != nil {
+	if err := os.MkdirAll(cfg.LogsDir, 0o750); err != nil {
 		cancel()
 		return nil, fmt.Errorf("failed to create logs dir: %w", err)
 	}
@@ -255,8 +258,8 @@ func (n *TestNode) ValidateTicket(ticketID string, data []byte) error {
 	url := fmt.Sprintf("http://localhost:%d/api/v1/tickets/validate", n.APIPort)
 
 	payload := map[string]interface{}{
-		"ticket_id": ticketID,
-		"data":      data,
+		jsonKeyTicketID: ticketID,
+		"data":          data,
 	}
 
 	body, err := json.Marshal(payload)
@@ -271,7 +274,10 @@ func (n *TestNode) ValidateTicket(ticketID string, data []byte) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("validation failed with status %d (failed to read response body: %w)", resp.StatusCode, err)
+		}
 		return fmt.Errorf("validation failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -283,7 +289,7 @@ func (n *TestNode) ConsumeTicket(ticketID string) error {
 	url := fmt.Sprintf("http://localhost:%d/api/v1/tickets/consume", n.APIPort)
 
 	payload := map[string]interface{}{
-		"ticket_id": ticketID,
+		jsonKeyTicketID: ticketID,
 	}
 
 	body, err := json.Marshal(payload)
@@ -298,7 +304,10 @@ func (n *TestNode) ConsumeTicket(ticketID string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("consume failed with status %d (failed to read response body: %w)", resp.StatusCode, err)
+		}
 		return fmt.Errorf("consume failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -310,7 +319,7 @@ func (n *TestNode) DisputeTicket(ticketID string) error {
 	url := fmt.Sprintf("http://localhost:%d/api/v1/tickets/dispute", n.APIPort)
 
 	payload := map[string]interface{}{
-		"ticket_id": ticketID,
+		jsonKeyTicketID: ticketID,
 	}
 
 	body, err := json.Marshal(payload)
@@ -325,7 +334,10 @@ func (n *TestNode) DisputeTicket(ticketID string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("dispute failed with status %d (failed to read response body: %w)", resp.StatusCode, err)
+		}
 		return fmt.Errorf("dispute failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -352,7 +364,13 @@ func (n *TestNode) GetTicket(ticketID string) (map[string]interface{}, error) {
 
 // GetAllTickets retrieves all tickets via the API
 func (n *TestNode) GetAllTickets() ([]map[string]interface{}, error) {
-	url := fmt.Sprintf("http://localhost:%d/api/v1/tickets", n.APIPort)
+	return n.getList("/api/v1/tickets")
+}
+
+// getList fetches a JSON list endpoint and returns the objects contained in
+// its "data" field. Missing or malformed data yields an empty slice.
+func (n *TestNode) getList(path string) ([]map[string]interface{}, error) {
+	url := fmt.Sprintf("http://localhost:%d%s", n.APIPort, path)
 
 	resp, err := n.httpClient.Get(url)
 	if err != nil {
@@ -365,18 +383,18 @@ func (n *TestNode) GetAllTickets() ([]map[string]interface{}, error) {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	// Extract tickets from data field
-	if data, ok := result["data"].([]interface{}); ok {
-		tickets := make([]map[string]interface{}, len(data))
-		for i, item := range data {
-			if ticket, ok := item.(map[string]interface{}); ok {
-				tickets[i] = ticket
-			}
-		}
-		return tickets, nil
+	data, ok := result["data"].([]interface{})
+	if !ok {
+		return []map[string]interface{}{}, nil
 	}
 
-	return []map[string]interface{}{}, nil
+	items := make([]map[string]interface{}, len(data))
+	for i, item := range data {
+		if entry, ok := item.(map[string]interface{}); ok {
+			items[i] = entry
+		}
+	}
+	return items, nil
 }
 
 // GetStats retrieves node stats via the API
@@ -403,30 +421,7 @@ func (n *TestNode) GetStats() (map[string]interface{}, error) {
 
 // GetPeers retrieves peer information via the API
 func (n *TestNode) GetPeers() ([]map[string]interface{}, error) {
-	url := fmt.Sprintf("http://localhost:%d/api/v1/peers", n.APIPort)
-
-	resp, err := n.httpClient.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	if data, ok := result["data"].([]interface{}); ok {
-		peers := make([]map[string]interface{}, len(data))
-		for i, item := range data {
-			if peer, ok := item.(map[string]interface{}); ok {
-				peers[i] = peer
-			}
-		}
-		return peers, nil
-	}
-
-	return []map[string]interface{}{}, nil
+	return n.getList("/api/v1/peers")
 }
 
 // GetLogs retrieves the last N lines from the node's log file

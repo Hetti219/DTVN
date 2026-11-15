@@ -39,7 +39,9 @@ func (mc *MessageCache) Add(msg *Message) {
 	// Check if already exists
 	if elem, exists := mc.cache[msg.ID]; exists {
 		mc.lru.MoveToFront(elem)
-		elem.Value.(*cacheEntry).message = msg
+		if entry, ok := elem.Value.(*cacheEntry); ok {
+			entry.message = msg
+		}
 		return
 	}
 
@@ -84,7 +86,9 @@ func (mc *MessageCache) Get(msgID string) (*Message, bool) {
 
 	if elem, exists := mc.cache[msgID]; exists {
 		mc.lru.MoveToFront(elem)
-		return elem.Value.(*cacheEntry).message, true
+		if entry, ok := elem.Value.(*cacheEntry); ok {
+			return entry.message, true
+		}
 	}
 
 	return nil, false
@@ -114,8 +118,9 @@ func (mc *MessageCache) evict() {
 	elem := mc.lru.Back()
 	if elem != nil {
 		mc.lru.Remove(elem)
-		entry := elem.Value.(*cacheEntry)
-		delete(mc.cache, entry.key)
+		if entry, ok := elem.Value.(*cacheEntry); ok {
+			delete(mc.cache, entry.key)
+		}
 	}
 }
 

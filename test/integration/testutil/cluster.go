@@ -386,13 +386,14 @@ func (c *TestCluster) GetClusterStats() (map[string]interface{}, error) {
 	totalConsensusRounds := int64(0)
 	totalMessagesSent := int64(0)
 	totalMessagesReceived := int64(0)
+	healthyNodes := 0
 
 	for _, node := range c.Nodes {
 		if !node.IsHealthy() {
 			continue
 		}
 
-		stats["healthy_nodes"] = stats["healthy_nodes"].(int) + 1
+		healthyNodes++
 
 		nodeStats, err := node.GetStats()
 		if err != nil {
@@ -416,6 +417,7 @@ func (c *TestCluster) GetClusterStats() (map[string]interface{}, error) {
 		}
 	}
 
+	stats["healthy_nodes"] = healthyNodes
 	stats["total_tickets"] = totalTickets
 	stats["consensus_rounds"] = totalConsensusRounds
 	stats["messages_sent"] = totalMessagesSent

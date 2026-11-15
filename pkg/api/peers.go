@@ -1,7 +1,6 @@
 package api
 
 import (
-	"encoding/json"
 	"net/http"
 )
 
@@ -25,9 +24,7 @@ func (s *Server) handleGetPeers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(Response{
+	writeJSONResponse(w, http.StatusOK, Response{
 		Success: true,
 		Message: "Peers retrieved successfully",
 		Data:    PeersResponse{Peers: peers},
