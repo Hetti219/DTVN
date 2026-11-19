@@ -889,21 +889,23 @@ func (n *PBFTNode) HandleCheckpoint(ckpt *Checkpoint) error {
 
 	// Establish stable checkpoint if any digest has quorum
 	for digest, count := range digests {
-		if count >= required {
-			fmt.Printf("PBFT: Node %s stable checkpoint at seq %d (digest: %s)\n",
-				n.nodeID, ckpt.Sequence, digest)
-
-			n.lastStableCheckpoint = ckpt.Sequence
-			n.garbageCollect(ckpt.Sequence)
-
-			// Clean up old checkpoint votes
-			for seq := range n.checkpointVotes {
-				if seq <= ckpt.Sequence {
-					delete(n.checkpointVotes, seq)
-				}
-			}
-			break
+		if count < required {
+			continue
 		}
+
+		fmt.Printf("PBFT: Node %s stable checkpoint at seq %d (digest: %s)\n",
+			n.nodeID, ckpt.Sequence, digest)
+
+		n.lastStableCheckpoint = ckpt.Sequence
+		n.garbageCollect(ckpt.Sequence)
+
+		// Clean up old checkpoint votes
+		for seq := range n.checkpointVotes {
+			if seq <= ckpt.Sequence {
+				delete(n.checkpointVotes, seq)
+			}
+		}
+		break
 	}
 
 	return nil
@@ -1030,51 +1032,36 @@ func (n *PBFTNode) ClearPendingRequest() {
 	n.hasPendingClientRequest = false
 }
 
+// networkMessageTypeNames maps a PBFT message type to its human readable name.
+var networkMessageTypeNames = map[int32]string{
+	0: "PRE_PREPARE",
+	1: "PREPARE",
+	2: "COMMIT",
+	3: "VIEW_CHANGE",
+	4: "CHECKPOINT",
+	6: "HEARTBEAT",
+	7: "CLIENT_REQUEST",
+}
+
+// networkMessageTypeName returns the human readable name of a PBFT message type.
+func networkMessageTypeName(msgType int32) string {
+	if name, ok := networkMessageTypeNames[msgType]; ok {
+		return name
+	}
+	return fmt.Sprintf("UNKNOWN(%d)", msgType)
+}
+
 // HandleNetworkMessage processes incoming PBFT messages from the network layer
 func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
-	var msg ConsensusMessage
-	var err error
-
 	// Map message type to name for logging
-	msgTypeName := map[int32]string{
-		0: "PRE_PREPARE",
-		1: "PREPARE",
-		2: "COMMIT",
-		3: "VIEW_CHANGE",
-		4: "CHECKPOINT",
-		6: "HEARTBEAT",
-		7: "CLIENT_REQUEST",
-	}[msgType]
-	if msgTypeName == "" {
-		msgTypeName = fmt.Sprintf("UNKNOWN(%d)", msgType)
-	}
+	msgTypeName := networkMessageTypeName(msgType)
 
 	fmt.Printf("PBFT: Node %s HandleNetworkMessage called with type %s (payload size: %d bytes)\n",
 		n.nodeID, msgTypeName, len(payload))
 
-	// Deserialize based on message type
+	// Message types that are not consumed by the consensus loop are handled
+	// directly by their dedicated handlers.
 	switch msgType {
-	case 0: // PRE_PREPARE
-		msg, err = DeserializePrePrepare(payload)
-		if err == nil {
-			prePrepare := msg.(*PrePrepareMsg)
-			fmt.Printf("PBFT: Node %s deserialized PRE_PREPARE for seq %d, view %d\n",
-				n.nodeID, prePrepare.Sequence, prePrepare.View)
-		}
-	case 1: // PREPARE
-		msg, err = DeserializePrepare(payload)
-		if err == nil {
-			prepare := msg.(*PrepareMsg)
-			fmt.Printf("PBFT: Node %s deserialized PREPARE from %s for seq %d, view %d\n",
-				n.nodeID, prepare.NodeID, prepare.Sequence, prepare.View)
-		}
-	case 2: // COMMIT
-		msg, err = DeserializeCommit(payload)
-		if err == nil {
-			commit := msg.(*CommitMsg)
-			fmt.Printf("PBFT: Node %s deserialized COMMIT from %s for seq %d, view %d\n",
-				n.nodeID, commit.NodeID, commit.Sequence, commit.View)
-		}
 	case 3: // VIEW_CHANGE
 		viewChangeMsg, err := DeserializeViewChange(payload)
 		if err != nil {
@@ -1091,31 +1078,16 @@ func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
 		fmt.Printf("PBFT: Node %s received HEARTBEAT (payload size: %d bytes)\n", n.nodeID, len(payload))
 		return nil
 	case 7: // CLIENT_REQUEST - forwarded from non-primary node
-		req, err := DeserializeRequest(payload)
-		if err != nil {
-			return fmt.Errorf("failed to deserialize client request: %w", err)
-		}
-
-		if !n.IsPrimary() {
-			// Non-primary: track the request so the view timer can trigger a
-			// view change if the primary never starts consensus (dead primary).
-			fmt.Printf("PBFT: Non-primary %s received CLIENT_REQUEST for ticket %s, tracking for view change\n",
-				n.nodeID, req.TicketID)
-			n.NotifyPendingRequest()
-			return nil
-		}
-
-		fmt.Printf("PBFT: Primary %s received forwarded client request for ticket %s\n", n.nodeID, req.TicketID)
-
-		// Propose the request through consensus
-		return n.ProposeRequest(req)
-	default:
-		return fmt.Errorf("unsupported PBFT message type: %d", msgType)
+		return n.handleClientRequest(payload)
 	}
 
+	// Deserialize the message types that are queued for the consensus loop.
+	msg, err := n.deserializeQueuedMessage(msgType, payload)
 	if err != nil {
-		fmt.Printf("PBFT: Node %s failed to deserialize %s message: %v\n", n.nodeID, msgTypeName, err)
-		return fmt.Errorf("failed to deserialize message: %w", err)
+		return err
+	}
+	if msg == nil {
+		return fmt.Errorf("unsupported PBFT message type: %d", msgType)
 	}
 
 	// Inject into message queue
@@ -1129,6 +1101,61 @@ func (n *PBFTNode) HandleNetworkMessage(msgType int32, payload []byte) error {
 		fmt.Printf("PBFT: Node %s message queue FULL, dropping %s message!\n", n.nodeID, msgTypeName)
 		return fmt.Errorf("message queue full, dropping message")
 	}
+}
+
+// deserializeQueuedMessage deserializes the message types that are handed to
+// the consensus loop. It returns a nil message for unsupported types.
+func (n *PBFTNode) deserializeQueuedMessage(msgType int32, payload []byte) (ConsensusMessage, error) {
+	switch msgType {
+	case 0: // PRE_PREPARE
+		prePrepare, err := DeserializePrePrepare(payload)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deserialize pre-prepare: %w", err)
+		}
+		fmt.Printf("PBFT: Node %s deserialized PRE_PREPARE for seq %d, view %d\n",
+			n.nodeID, prePrepare.Sequence, prePrepare.View)
+		return prePrepare, nil
+	case 1: // PREPARE
+		prepare, err := DeserializePrepare(payload)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deserialize prepare: %w", err)
+		}
+		fmt.Printf("PBFT: Node %s deserialized PREPARE from %s for seq %d, view %d\n",
+			n.nodeID, prepare.NodeID, prepare.Sequence, prepare.View)
+		return prepare, nil
+	case 2: // COMMIT
+		commit, err := DeserializeCommit(payload)
+		if err != nil {
+			return nil, fmt.Errorf("failed to deserialize commit: %w", err)
+		}
+		fmt.Printf("PBFT: Node %s deserialized COMMIT from %s for seq %d, view %d\n",
+			n.nodeID, commit.NodeID, commit.Sequence, commit.View)
+		return commit, nil
+	default:
+		return nil, nil
+	}
+}
+
+// handleClientRequest handles a client request forwarded by a non-primary node.
+func (n *PBFTNode) handleClientRequest(payload []byte) error {
+	req, err := DeserializeRequest(payload)
+	if err != nil {
+		return fmt.Errorf("failed to deserialize client request: %w", err)
+	}
+
+	if !n.IsPrimary() {
+		// Non-primary: track the request so the view timer can trigger a
+		// view change if the primary never starts consensus (dead primary).
+		fmt.Printf("PBFT: Non-primary %s received CLIENT_REQUEST for ticket %s, tracking for view change\n",
+			n.nodeID, req.TicketID)
+		n.NotifyPendingRequest()
+		return nil
+	}
+
+	fmt.Printf("PBFT: Primary %s received forwarded client request for ticket %s\n", n.nodeID, req.TicketID)
+
+	// Propose the request through consensus
+	return n.ProposeRequest(req)
 }
 
 // Close shuts down the PBFT node

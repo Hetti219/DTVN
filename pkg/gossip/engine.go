@@ -283,7 +283,7 @@ func (g *GossipEngine) adjustFanout() {
 			return
 		case <-ticker.C:
 			peerCount := g.peers.GetPeerCount()
-			// Fanout = sqrt(n)
+			// Fanout scales with the square root of the peer count.
 			newFanout := int(math.Sqrt(float64(peerCount)))
 			if newFanout < 3 {
 				newFanout = 3 // Minimum fanout

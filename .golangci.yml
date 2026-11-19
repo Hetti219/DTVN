@@ -1,136 +1,160 @@
+version: "2"
 run:
-  timeout: 5m
-  tests: true
   modules-download-mode: readonly
-
+  tests: true
 linters:
   enable:
-    - errcheck      # Check for unchecked errors
-    - gosimple      # Simplify code
-    - govet         # Standard Go vet
-    - ineffassign   # Detect ineffectual assignments
-    - staticcheck   # Advanced static analysis
-    - unused        # Find unused code
-    - gofmt         # Check formatting
-    - goimports     # Check import formatting
-    - misspell      # Find misspelled English words
-    - revive        # Fast, configurable, extensible linter
-    - typecheck     # Type checking
-    - gosec         # Security-focused linter
     - bodyclose     # Check HTTP response body closed
-    - unconvert     # Remove unnecessary type conversions
+    - dupl          # Code clone detection
+    - errcheck      # Check for unchecked errors
+    - goconst       # Find repeated strings that could be constants
     - gocritic      # The most opinionated Go linter
     - gocyclo       # Cyclomatic complexity
-    - dupl          # Code clone detection
-    - goconst       # Find repeated strings that could be constants
+    - gosec         # Security-focused linter
+    - misspell      # Find misspelled English words
     - prealloc      # Find slice declarations that could be preallocated
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-    exclude-functions:
-      - (*database/sql.Rows).Close
-      - (*github.com/boltdb/bolt.Tx).Rollback
-
-  govet:
-    enable-all: true
-    disable:
-      - shadow      # Too strict for this codebase
-
-  gocyclo:
-    min-complexity: 15
-
-  goconst:
-    min-len: 3
-    min-occurrences: 3
-
-  gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-    disabled-checks:
-      - whyNoLint
-      - unnamedResult
-
-  gosec:
-    excludes:
-      - G104 # Errors unhandled (covered by errcheck)
-      - G304 # File path provided as taint input (we use user-provided paths intentionally)
-
-  revive:
+    - revive        # Fast, configurable, extensible linter
+    - unconvert     # Remove unnecessary type conversions
+  settings:
+    dupl:
+      threshold: 150
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+      exclude-functions:
+        - (*database/sql.Rows).Close
+        - (*go.etcd.io/bbolt.Tx).Rollback
+        - (*go.etcd.io/bbolt.DB).Close
+        - (*os.File).Close
+        - (*net.Conn).Close
+        - (io.ReadCloser).Close
+        - (*github.com/Hetti219/DTVN/pkg/storage.Store).Close
+        - (*github.com/Hetti219/DTVN/pkg/network.P2PHost).Close
+        - (*github.com/Hetti219/DTVN/pkg/gossip.GossipEngine).Close
+        - (*github.com/Hetti219/DTVN/pkg/consensus.PBFTNode).Close
+        - (*github.com/Hetti219/DTVN/test/integration/testutil.TestCluster).Stop
+        - (*github.com/Hetti219/DTVN/test/integration/testutil.TestCluster).Cleanup
+        - (*github.com/Hetti219/DTVN/test/integration/testutil.TestNode).Stop
+        - (*github.com/Hetti219/DTVN/test/integration/testutil.TestNode).Close
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    gocritic:
+      disabled-checks:
+        - whyNoLint
+        - unnamedResult
+      enabled-tags:
+        - diagnostic
+        - experimental
+        - opinionated
+        - performance
+        - style
+    gocyclo:
+      min-complexity: 15
+    gosec:
+      excludes:
+        - G104 # Errors unhandled (covered by errcheck)
+        - G304 # File path provided as taint input (we use user-provided paths intentionally)
+    govet:
+      enable-all: true
+      disable:
+        - shadow       # Too strict for this codebase
+        - fieldalignment # Pure struct-layout micro-optimisation
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+          disabled: true # Too strict for tests
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: package-comments
+          disabled: true # Not all packages need comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+          disabled: true # Interface implementations may not use all params
+        - name: unreachable-code
+        - name: redefines-builtin-id
+  exclusions:
+    generated: lax
     rules:
-      - name: blank-imports
-      - name: context-as-argument
-      - name: error-return
-      - name: error-strings
-      - name: error-naming
-      - name: exported
-        disabled: true # Too strict for tests
-      - name: if-return
-      - name: increment-decrement
-      - name: var-naming
-      - name: package-comments
-        disabled: true # Not all packages need comments
-      - name: range
-      - name: receiver-naming
-      - name: time-naming
-      - name: unexported-return
-      - name: indent-error-flow
-      - name: errorf
-      - name: empty-block
-      - name: superfluous-else
-      - name: unused-parameter
-        disabled: true # Interface implementations may not use all params
-      - name: unreachable-code
-      - name: redefines-builtin-id
+      # Exclude some linters from running on test files
+      - linters:
+          - dupl
+          - goconst
+          - gocyclo
+          - gosec
+        path: _test\.go
 
-  dupl:
-    threshold: 150
+      # Exclude generated protocol buffer code
+      # NOTE: in v2 the `all` keyword matches no linter inside an exclusion
+      # rule, so the enabled linters must be listed explicitly. The list below
+      # is the full effective enabled set (see `golangci-lint linters`).
+      - linters:
+          - bodyclose
+          - dupl
+          - errcheck
+          - goconst
+          - gocritic
+          - gocyclo
+          - gosec
+          - govet
+          - ineffassign
+          - misspell
+          - prealloc
+          - revive
+          - staticcheck
+          - unconvert
+          - unused
+        path: \.pb\.go$
 
+      # Allow init functions (used for crypto key generation)
+      - linters:
+          - gochecknoinits
+        source: func init\(\)
+
+      # Allow globals in main packages
+      - linters:
+          - gochecknoglobals
+        path: cmd/
+
+      # Ignore long lines in generated code
+      - linters:
+          - lll
+        path: proto/
+
+      # Ignore error shadowing in specific cases
+      - linters:
+          - govet
+        text: 'shadow: declaration of "err"'
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
 issues:
   # Maximum issues count per one linter
   max-issues-per-linter: 0
 
   # Maximum count of issues with the same text
   max-same-issues: 0
-
-  # Exclude some linters from running on test files
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - dupl
-        - gosec
-        - goconst
-        - gocyclo
-
-    # Exclude generated protocol buffer code
-    - path: '\.pb\.go$'
-      linters:
-        - all
-
-    # Allow init functions (used for crypto key generation)
-    - source: "func init\\(\\)"
-      linters:
-        - gochecknoinits
-
-    # Allow globals in main packages
-    - path: cmd/
-      linters:
-        - gochecknoglobals
-
-    # Ignore long lines in generated code
-    - path: proto/
-      linters:
-        - lll
-
-    # Ignore error shadowing in specific cases
-    - text: "shadow: declaration of \"err\""
-      linters:
-        - govet
-
-  # Show all issues from a linter
-  exclude-use-default: false
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$

@@ -901,7 +901,7 @@ func TestViewChange(t *testing.T) {
 		payload, err := SerializeRequest(req)
 		require.NoError(t, err)
 
-		err = node.HandleNetworkMessage(7, payload) // 7 = CLIENT_REQUEST
+		err = node.HandleNetworkMessage(7, payload) // message type 7 is CLIENT_REQUEST
 		require.NoError(t, err)                     // Should NOT error (was error before fix)
 
 		// Should have set pending request flag

@@ -39,7 +39,7 @@ func TestRegisterHandlers(t *testing.T) {
 		assert.NotNil(t, router.pbftHandler)
 
 		// Test handler
-		router.pbftHandler(pb.ValidatorMessage_PREPARE, []byte("test"))
+		require.NoError(t, router.pbftHandler(pb.ValidatorMessage_PREPARE, []byte("test")))
 		assert.True(t, called)
 	})
 
@@ -56,7 +56,7 @@ func TestRegisterHandlers(t *testing.T) {
 		assert.NotNil(t, router.stateHandler)
 
 		// Test handler
-		router.stateHandler(&pb.StateUpdate{})
+		require.NoError(t, router.stateHandler(&pb.StateUpdate{}))
 		assert.True(t, called)
 	})
 
@@ -73,7 +73,7 @@ func TestRegisterHandlers(t *testing.T) {
 		assert.NotNil(t, router.stateSyncHandler)
 
 		// Test handler
-		router.stateSyncHandler(pb.ValidatorMessage_STATE_SYNC_REQUEST, []byte("test"))
+		require.NoError(t, router.stateSyncHandler(pb.ValidatorMessage_STATE_SYNC_REQUEST, []byte("test")))
 		assert.True(t, called)
 	})
 
@@ -100,8 +100,10 @@ func TestRegisterHandlers(t *testing.T) {
 // TestRouteMessage tests message routing
 func TestRouteMessage(t *testing.T) {
 	// Create a dummy peer ID for testing
-	_, pub, _ := crypto.GenerateKeyPair(crypto.Ed25519, 2048)
-	senderID, _ := peer.IDFromPublicKey(pub)
+	_, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, 2048)
+	require.NoError(t, err)
+	senderID, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
 
 	t.Run("RoutePrePrepareMessage", func(t *testing.T) {
 		router := NewMessageRouter()
@@ -120,15 +122,17 @@ func TestRouteMessage(t *testing.T) {
 			RequestId: "test-request",
 			Operation: pb.TicketOperation_VALIDATE,
 		}
-		payload, _ := proto.Marshal(request)
+		payload, err := proto.Marshal(request)
+		require.NoError(t, err)
 
 		msg := &pb.ValidatorMessage{
 			Type:    pb.ValidatorMessage_PRE_PREPARE,
 			Payload: payload,
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		require.NoError(t, err)
 		assert.Equal(t, pb.ValidatorMessage_PRE_PREPARE, receivedType)
 		assert.Equal(t, payload, receivedPayload)
@@ -148,9 +152,10 @@ func TestRouteMessage(t *testing.T) {
 			Type:    pb.ValidatorMessage_PREPARE,
 			Payload: []byte("prepare-payload"),
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		require.NoError(t, err)
 		assert.Equal(t, pb.ValidatorMessage_PREPARE, receivedType)
 	})
@@ -169,9 +174,10 @@ func TestRouteMessage(t *testing.T) {
 			Type:    pb.ValidatorMessage_COMMIT,
 			Payload: []byte("commit-payload"),
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		require.NoError(t, err)
 		assert.Equal(t, pb.ValidatorMessage_COMMIT, receivedType)
 	})
@@ -189,15 +195,17 @@ func TestRouteMessage(t *testing.T) {
 		stateUpdate := &pb.StateUpdate{
 			NodeId: "test-node",
 		}
-		payload, _ := proto.Marshal(stateUpdate)
+		payload, err := proto.Marshal(stateUpdate)
+		require.NoError(t, err)
 
 		msg := &pb.ValidatorMessage{
 			Type:    pb.ValidatorMessage_STATE_UPDATE,
 			Payload: payload,
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		require.NoError(t, err)
 		require.NotNil(t, receivedUpdate)
 		assert.Equal(t, "test-node", receivedUpdate.NodeId)
@@ -217,9 +225,10 @@ func TestRouteMessage(t *testing.T) {
 			Type:    pb.ValidatorMessage_CLIENT_REQUEST,
 			Payload: []byte("client-request"),
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		require.NoError(t, err)
 		assert.Equal(t, pb.ValidatorMessage_CLIENT_REQUEST, receivedType)
 	})
@@ -238,9 +247,10 @@ func TestRouteMessage(t *testing.T) {
 			Type:    pb.ValidatorMessage_STATE_SYNC_REQUEST,
 			Payload: []byte("sync-request"),
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		require.NoError(t, err)
 		assert.Equal(t, pb.ValidatorMessage_STATE_SYNC_REQUEST, receivedType)
 	})
@@ -259,9 +269,10 @@ func TestRouteMessage(t *testing.T) {
 			Type:    pb.ValidatorMessage_STATE_SYNC_RESPONSE,
 			Payload: []byte("sync-response"),
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		require.NoError(t, err)
 		assert.Equal(t, pb.ValidatorMessage_STATE_SYNC_RESPONSE, receivedType)
 	})
@@ -269,8 +280,10 @@ func TestRouteMessage(t *testing.T) {
 
 // TestRouteMessageErrors tests error conditions
 func TestRouteMessageErrors(t *testing.T) {
-	_, pub, _ := crypto.GenerateKeyPair(crypto.Ed25519, 2048)
-	senderID, _ := peer.IDFromPublicKey(pub)
+	_, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, 2048)
+	require.NoError(t, err)
+	senderID, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
 
 	t.Run("InvalidMessageData", func(t *testing.T) {
 		router := NewMessageRouter()
@@ -287,9 +300,10 @@ func TestRouteMessageErrors(t *testing.T) {
 			Type:    pb.ValidatorMessage_PREPARE,
 			Payload: []byte("test"),
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no PBFT handler registered")
 	})
@@ -300,15 +314,17 @@ func TestRouteMessageErrors(t *testing.T) {
 		stateUpdate := &pb.StateUpdate{
 			NodeId: "test",
 		}
-		payload, _ := proto.Marshal(stateUpdate)
+		payload, err := proto.Marshal(stateUpdate)
+		require.NoError(t, err)
 
 		msg := &pb.ValidatorMessage{
 			Type:    pb.ValidatorMessage_STATE_UPDATE,
 			Payload: payload,
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no state handler registered")
 	})
@@ -320,9 +336,10 @@ func TestRouteMessageErrors(t *testing.T) {
 			Type:    pb.ValidatorMessage_STATE_SYNC_REQUEST,
 			Payload: []byte("test"),
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no state sync handler registered")
 	})
@@ -338,9 +355,10 @@ func TestRouteMessageErrors(t *testing.T) {
 			Type:    pb.ValidatorMessage_PREPARE,
 			Payload: []byte("test"),
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "handler error")
 	})
@@ -356,9 +374,10 @@ func TestRouteMessageErrors(t *testing.T) {
 			Type:    pb.ValidatorMessage_STATE_UPDATE,
 			Payload: []byte("invalid-state-update"),
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "failed to unmarshal state update")
 	})
@@ -367,8 +386,10 @@ func TestRouteMessageErrors(t *testing.T) {
 // TestViewChangeCheckpointHeartbeatRouting tests that VIEW_CHANGE, CHECKPOINT,
 // and HEARTBEAT messages are routed to the PBFT handler
 func TestViewChangeCheckpointHeartbeatRouting(t *testing.T) {
-	_, pub, _ := crypto.GenerateKeyPair(crypto.Ed25519, 2048)
-	senderID, _ := peer.IDFromPublicKey(pub)
+	_, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, 2048)
+	require.NoError(t, err)
+	senderID, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
 
 	t.Run("ViewChangeMessage", func(t *testing.T) {
 		router := NewMessageRouter()
@@ -384,9 +405,10 @@ func TestViewChangeCheckpointHeartbeatRouting(t *testing.T) {
 			Type:    pb.ValidatorMessage_VIEW_CHANGE,
 			Payload: []byte("view-change"),
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		require.NoError(t, err)
 		assert.Equal(t, pb.ValidatorMessage_VIEW_CHANGE, receivedType)
 	})
@@ -405,9 +427,10 @@ func TestViewChangeCheckpointHeartbeatRouting(t *testing.T) {
 			Type:    pb.ValidatorMessage_CHECKPOINT,
 			Payload: []byte("checkpoint"),
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		require.NoError(t, err)
 		assert.Equal(t, pb.ValidatorMessage_CHECKPOINT, receivedType)
 	})
@@ -426,9 +449,10 @@ func TestViewChangeCheckpointHeartbeatRouting(t *testing.T) {
 			Type:    pb.ValidatorMessage_HEARTBEAT,
 			Payload: []byte("heartbeat"),
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		require.NoError(t, err)
 		assert.Equal(t, pb.ValidatorMessage_HEARTBEAT, receivedType)
 	})
@@ -440,9 +464,10 @@ func TestViewChangeCheckpointHeartbeatRouting(t *testing.T) {
 			Type:    pb.ValidatorMessage_VIEW_CHANGE,
 			Payload: []byte("view-change"),
 		}
-		data, _ := proto.Marshal(msg)
+		data, err := proto.Marshal(msg)
+		require.NoError(t, err)
 
-		err := router.RouteMessage(data, senderID)
+		err = router.RouteMessage(data, senderID)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "no PBFT handler registered")
 	})
@@ -450,8 +475,10 @@ func TestViewChangeCheckpointHeartbeatRouting(t *testing.T) {
 
 // TestMultipleMessageRouting tests routing multiple messages
 func TestMultipleMessageRouting(t *testing.T) {
-	_, pub, _ := crypto.GenerateKeyPair(crypto.Ed25519, 2048)
-	senderID, _ := peer.IDFromPublicKey(pub)
+	_, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, 2048)
+	require.NoError(t, err)
+	senderID, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
 
 	t.Run("RouteMultipleMessages", func(t *testing.T) {
 		router := NewMessageRouter()
@@ -475,21 +502,24 @@ func TestMultipleMessageRouting(t *testing.T) {
 				Type:    pb.ValidatorMessage_PREPARE,
 				Payload: []byte("test"),
 			}
-			data, _ := proto.Marshal(msg)
-			router.RouteMessage(data, senderID)
+			data, err := proto.Marshal(msg)
+			require.NoError(t, err)
+			require.NoError(t, router.RouteMessage(data, senderID))
 		}
 
 		// Send state messages
 		for i := 0; i < 3; i++ {
 			stateUpdate := &pb.StateUpdate{NodeId: "test"}
-			payload, _ := proto.Marshal(stateUpdate)
+			payload, err := proto.Marshal(stateUpdate)
+			require.NoError(t, err)
 
 			msg := &pb.ValidatorMessage{
 				Type:    pb.ValidatorMessage_STATE_UPDATE,
 				Payload: payload,
 			}
-			data, _ := proto.Marshal(msg)
-			router.RouteMessage(data, senderID)
+			data, err := proto.Marshal(msg)
+			require.NoError(t, err)
+			require.NoError(t, router.RouteMessage(data, senderID))
 		}
 
 		assert.Equal(t, 5, pbftCount)
@@ -499,8 +529,10 @@ func TestMultipleMessageRouting(t *testing.T) {
 
 // TestConcurrentRouting tests thread safety
 func TestConcurrentRouting(t *testing.T) {
-	_, pub, _ := crypto.GenerateKeyPair(crypto.Ed25519, 2048)
-	senderID, _ := peer.IDFromPublicKey(pub)
+	_, pub, err := crypto.GenerateKeyPair(crypto.Ed25519, 2048)
+	require.NoError(t, err)
+	senderID, err := peer.IDFromPublicKey(pub)
+	require.NoError(t, err)
 
 	t.Run("ConcurrentMessageRouting", func(t *testing.T) {
 		router := NewMessageRouter()
@@ -522,8 +554,9 @@ func TestConcurrentRouting(t *testing.T) {
 					Type:    pb.ValidatorMessage_PREPARE,
 					Payload: []byte("test"),
 				}
-				data, _ := proto.Marshal(msg)
-				router.RouteMessage(data, senderID)
+				data, err := proto.Marshal(msg)
+				assert.NoError(t, err)
+				assert.NoError(t, router.RouteMessage(data, senderID))
 				done <- true
 			}()
 		}

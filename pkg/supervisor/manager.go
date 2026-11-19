@@ -154,13 +154,13 @@ func NewNodeManager(cfg *NodeManagerConfig) *NodeManager {
 }
 
 // StartNode starts a single validator node
-func (m *NodeManager) StartNode(nodeID string, isPrimary bool, isBootstrap bool, bootstrapAddr string) error {
+func (m *NodeManager) StartNode(nodeID string, isPrimary, isBootstrap bool, bootstrapAddr string) error {
 	return m.startNodeWithTotal(nodeID, isPrimary, isBootstrap, bootstrapAddr, 0)
 }
 
 // startNodeWithTotal starts a single validator node with a specific total node count.
 // If targetTotal is 0, it uses len(m.nodes) as the total (for single-node additions).
-func (m *NodeManager) startNodeWithTotal(nodeID string, isPrimary bool, isBootstrap bool, bootstrapAddr string, targetTotal int) error {
+func (m *NodeManager) startNodeWithTotal(nodeID string, isPrimary, isBootstrap bool, bootstrapAddr string, targetTotal int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -294,13 +294,14 @@ func (m *NodeManager) startNodeProcess(node *ManagedNode, bootstrapAddr string) 
 	err = cmd.Wait()
 
 	node.mu.Lock()
-	if ctx.Err() == context.Canceled {
+	switch {
+	case ctx.Err() == context.Canceled:
 		// Normal shutdown
 		node.Status = NodeStatusStopped
-	} else if err != nil {
+	case err != nil:
 		node.Status = NodeStatusError
 		node.Error = fmt.Sprintf("process exited with error: %v", err)
-	} else {
+	default:
 		node.Status = NodeStatusStopped
 	}
 	node.mu.Unlock()
@@ -379,7 +380,9 @@ func (m *NodeManager) StopAllNodes() {
 	m.mu.RUnlock()
 
 	for _, id := range nodeIDs {
-		_ = m.StopNode(id)
+		if err := m.StopNode(id); err != nil {
+			fmt.Printf("Supervisor: failed to stop node %s: %v\n", id, err)
+		}
 	}
 }
 
@@ -645,7 +648,7 @@ func (m *NodeManager) waitForAllStopped(timeout time.Duration) {
 }
 
 // notifyCluster sends cluster status updates via callback
-func (m *NodeManager) notifyCluster(status ClusterStatus, nodesStarted int, nodesTotal int) {
+func (m *NodeManager) notifyCluster(status ClusterStatus, nodesStarted, nodesTotal int) {
 	if m.clusterCallback != nil {
 		m.clusterCallback(status, nodesStarted, nodesTotal)
 	}

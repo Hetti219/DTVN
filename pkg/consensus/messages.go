@@ -179,9 +179,9 @@ func DeserializeCommit(data []byte) (*CommitMsg, error) {
 // SerializeRequest serializes a Request to protobuf format
 func SerializeRequest(req *Request) ([]byte, error) {
 	reqProto := &pb.Request{
-		RequestId: req.RequestID,
-		TicketId:  req.TicketID,
-		Operation: operationToProto(req.Operation),
+		RequestId:  req.RequestID,
+		TicketId:   req.TicketID,
+		Operation:  operationToProto(req.Operation),
 		TicketData: req.Data,
 		Timestamp:  req.Timestamp,
 		// NodeID is stored in ClientSignature ([]byte) because the proto Request
